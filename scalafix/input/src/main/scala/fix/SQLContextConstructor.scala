@@ -12,12 +12,12 @@ import org.scalacheck.{Arbitrary, Gen}
 
 object BadSessionBuilder {
   def getSQLContext(sc: SparkContext): SQLContext = {
-    val ctx = new SQLContext(sc)
+    val ctx = new SQLContext(sc) // assert: MigrateToSparkSessionBuilder
     ctx
   }
 
   def getOrCreateSQL(sc: SparkContext): SQLContext = {
-    val ctx = SQLContext.getOrCreate(sc)
+    val ctx = SQLContext.getOrCreate(sc) // assert: MigrateToSparkSessionBuilder
     val boop = SQLContext.clearActive() // We shouldn't rewrite this
     ctx
   }

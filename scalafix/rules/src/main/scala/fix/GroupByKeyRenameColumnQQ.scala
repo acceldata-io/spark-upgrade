@@ -1,5 +1,6 @@
 package fix
 
+import fix.support.{RuleChange, RuleFinding}
 import scalafix.v1._
 import scala.meta._
 
@@ -11,21 +12,29 @@ class GroupByKeyRenameColumnQQ
   override val isRewrite = true
 
   override def fix(implicit doc: SemanticDocument): Patch = {
+    val ruleId = "GroupByKeyRenameColumnQQ"
+    val explanation = "Since Spark 3.0, Dataset.groupByKey(...).count() names the grouping column \"key\" instead of \"value\"."
+
+    def renamed(t: Term, replacement: String): Patch =
+      RuleFinding.report(
+        RuleChange(ruleId, explanation, s"Rewrote to $replacement", t),
+        Patch.replaceTree(t, replacement)
+      )
 
     def matchOnTerm(t: Term): Patch = {
       val p = t match {
-        case q""""value"""" => Patch.replaceTree(t, q""""key"""".toString())
-        case q"""'value"""  => Patch.replaceTree(t, q"""'key""".toString())
+        case q""""value"""" => renamed(t, q""""key"""".toString())
+        case q"""'value"""  => renamed(t, q"""'key""".toString())
         case q"""col("value")""" =>
-          Patch.replaceTree(t, q"""col("key")""".toString())
+          renamed(t, q"""col("key")""".toString())
         case q"""col("value").as""" =>
-          Patch.replaceTree(t, q"""col("key").as""".toString())
+          renamed(t, q"""col("key").as""".toString())
         case q"""col("value").alias""" =>
-          Patch.replaceTree(t, q"""col("key").alias""".toString())
+          renamed(t, q"""col("key").alias""".toString())
         case q"""upper(col("value"))""" =>
-          Patch.replaceTree(t, q"""upper(col("key"))""".toString())
+          renamed(t, q"""upper(col("key"))""".toString())
         case q"""upper(col('value))""" =>
-          Patch.replaceTree(t, q"""upper(col('key))""".toString())
+          renamed(t, q"""upper(col('key))""".toString())
         case _ if ! t.children.isEmpty =>
           t.children.map {
             case e: scala.meta.Term => matchOnTerm(e)

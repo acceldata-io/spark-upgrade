@@ -1,4 +1,5 @@
 package fix
+import fix.support.{RuleChange, RuleFinding}
 import scalafix.v1._
 import scala.meta._
 
@@ -12,6 +13,14 @@ class GroupByKeyRewrite extends SemanticRule("GroupByKeyRewrite") {
     val oprCol = "withColumnRenamed"
     val colNameOld = "value"
     val colNameNew = "key"
+    val ruleId = "GroupByKeyRewrite"
+    val explanation = "Since Spark 3.0, Dataset.groupByKey(...).toDS().count() names the grouping column \"key\" instead of \"value\"."
+
+    def renamed(oldTree: Tree, replacement: String)(implicit doc: SemanticDocument): Patch =
+      RuleFinding.report(
+        RuleChange(ruleId, explanation, s"Rewrote to $replacement", oldTree),
+        Patch.replaceTree(oldTree, replacement)
+      )
 
     def matchOnTree(t: Tree): Patch = {
       t.collect {
@@ -44,7 +53,7 @@ class GroupByKeyRewrite extends SemanticRule("GroupByKeyRewrite") {
               .equals(grpByKeyName) && funcToDS.equals(fName) && agrFunCount
               .equals(oprName) && oprCol.equals(oprColumnName) && colNameOld
               .equals(valueOld) =>
-          Patch.replaceTree(oldColName, "\"".concat(colNameNew).concat("\""))
+          renamed(oldColName, "\"".concat(colNameNew).concat("\""))
         case Term.Apply(
               Term.Select(
                 Term.Apply(
@@ -81,7 +90,7 @@ class GroupByKeyRewrite extends SemanticRule("GroupByKeyRewrite") {
               .equals(grpByKeyName) && funcToDS.equals(toDSName) && agrFunCount
               .equals(countName) && "select".equals(selectName) && "$"
               .equals(cName) && "value".equals(colOldName) =>
-          Patch.replaceTree(colOld, colNameNew)
+          renamed(colOld, colNameNew)
         case Term.Apply(
               Term.Select(
                 Term.Apply(
@@ -119,7 +128,7 @@ class GroupByKeyRewrite extends SemanticRule("GroupByKeyRewrite") {
               countName
             ) && "select".equals(selectName) && "col"
               .equals(colName) && colNameOld.equals(valueName) =>
-          Patch.replaceTree(oldNameColumn, "\"".concat(colNameNew).concat("\""))
+          renamed(oldNameColumn, "\"".concat(colNameNew).concat("\""))
         case Term.Apply(
               Term.Select(
                 Term.Apply(
@@ -154,7 +163,7 @@ class GroupByKeyRewrite extends SemanticRule("GroupByKeyRewrite") {
               countName
             ) && "select"
               .equals(selectName) && "'value".equals(valueName.toString()) =>
-          Patch.replaceTree(oldNameColumn, "'".concat(colNameNew))
+          renamed(oldNameColumn, "'".concat(colNameNew))
 
         case Term.Apply(
               Term.Select(
@@ -199,7 +208,7 @@ class GroupByKeyRewrite extends SemanticRule("GroupByKeyRewrite") {
             ) && "withColumn".equals(withColumnName) && "col".equals(
               colName
             ) && "value".equals(valueName) =>
-          Patch.replaceTree(oldNameColumn, "\"".concat(colNameNew).concat("\""))
+          renamed(oldNameColumn, "\"".concat(colNameNew).concat("\""))
       }.asPatch
     }
 

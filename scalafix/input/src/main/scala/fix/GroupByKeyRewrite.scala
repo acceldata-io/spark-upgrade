@@ -13,7 +13,7 @@ object GroupByKeyRewrite {
         .toDS()
         .groupByKey(l => l.substring(0, 3))
         .count()
-        .withColumnRenamed("value", "newName")
+        .withColumnRenamed("value", "newName") // assert: GroupByKeyRewrite
 
     val ds11 =
       List("Paerson 1", "Person 2", "User 1", "User 2", "test", "gggg")
@@ -30,34 +30,34 @@ object GroupByKeyRewrite {
         .toDS()
         .groupByKey(l => l.substring(0, 3))
         .count()
-        .select($"value", $"count(1)")
+        .select($"value", $"count(1)") // assert: GroupByKeyRewrite
 
     val ds3 =
       List("Paerson 1", "Person 2", "User 1", "User 2", "test", "gggg")
         .toDS()
         .groupByKey(l => l.substring(0, 3))
         .count()
-        .select(col("value"), col("count(1)"))
+        .select(col("value"), col("count(1)")) // assert: GroupByKeyRewrite
 
     val ds4 =
       List("Paerson 1", "Person 2", "User 1", "User 2", "test", "gggg")
         .toDS()
         .groupByKey(l => l.substring(0, 3))
         .count()
-        .select('value, 'count (1))
+        .select('value, 'count (1)) // assert: GroupByKeyRewrite
 
     val ds5 =
       List("Paerson 1", "Person 2", "User 1", "User 2", "test", "gggg")
         .toDS()
         .groupByKey(l => l.substring(0, 3))
         .count()
-        .withColumn("newNameCol", upper(col("value")))
+        .withColumn("newNameCol", upper(col("value"))) // assert: GroupByKeyRewrite
 
     val ds6 =
       List("Paerson 1", "Person 2", "User 1", "User 2", "test", "gggg")
         .toDS()
         .groupByKey(l => l.substring(0, 3))
         .count()
-        .withColumn("value", upper(col("value")))
+        .withColumn("value", upper(col("value"))) // assert: GroupByKeyRewrite
   }
 }

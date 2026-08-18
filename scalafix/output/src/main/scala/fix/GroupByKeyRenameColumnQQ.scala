@@ -16,7 +16,7 @@ object GroupByKeyRenameColumnQQ {
 
     // Do change the inidrect ds ones
     val ds11 =
-      ds.groupByKey(c => c.substring(0, 3)).count().select(col("key"))
+      ds.groupByKey(c => c.substring(0, 3)).count().select(col("key")) 
     val df: DataFrame = null
     var words1: Dataset[Row] = null
     def keyMe(a: Row): String = {
@@ -24,42 +24,45 @@ object GroupByKeyRenameColumnQQ {
     }
     val stopArray = array(lit("hi"))
     val splitPattern = ""
-    words1.groupByKey(keyMe).count().select(col("key").as("word"), col("count(1)")).orderBy("count(1)")
+    words1.groupByKey(keyMe).count().select(col("key").as("word"), col("count(1)")).orderBy("count(1)") 
     val words = df.select(explode(split(lower(col("value")), splitPattern)).as("words")).filter(
       not(array_contains(stopArray, col("words"))))
-    words.groupByKey(keyMe).count().select(col("key").as("word"), col("count(1)")).orderBy("count(1)")
+    words.groupByKey(keyMe).count().select(col("key").as("word"), col("count(1)")).orderBy("count(1)") 
 
     val ds10 = List("Person 1", "Person 2", "User 1", "User 3", "test")
       .toDS()
       .groupByKey(i => i.substring(0, 3))
       .count()
-      .select(col("key"))
+      .select(col("key")) 
 
     val ds1 = List("Person 1", "Person 2", "User 1", "User 3", "test")
       .toDS()
       .groupByKey(i => i.substring(0, 3))
       .count()
-      .select('key)
+      .select('key) 
 
     val ds2 = List("Person 1", "Person 2", "User 1", "User 3", "test")
       .toDS()
       .groupByKey(i => i.substring(0, 3))
       .count()
-      .withColumn("key", upper(col("key")))
+      .withColumn(
+        "key", 
+        upper(col("key")) 
+      )
 
     val ds3 =
       List("Paerson 1", "Person 2", "User 1", "User 2", "test", "gggg")
         .toDS()
         .groupByKey(l => l.substring(0, 3))
         .count()
-        .withColumnRenamed("key", "newName")
+        .withColumnRenamed("key", "newName") 
 
     val ds5 =
       List("Paerson 1", "Person 2", "User 1", "User 2", "test", "gggg")
         .toDS()
         .groupByKey(l => l.substring(0, 3))
         .count()
-        .withColumn("newNameCol", upper(col("key")))
+        .withColumn("newNameCol", upper(col("key"))) 
 
     val ds00 = List("Person 1", "Person 2", "User 1", "User 3", "test")
       .toDS()
@@ -98,7 +101,7 @@ object GroupByKeyRenameColumnQQ {
       .as[String]
       .groupByKey(l => l.substring(0, 3))
       .count()
-      .select('key)
+      .select('key) 
   }
   def inSource3(spark: SparkSession): Unit = {
     import spark.implicits._

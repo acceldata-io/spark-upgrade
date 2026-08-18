@@ -1,4 +1,5 @@
 package fix
+import fix.support.{RuleChange, RuleFinding}
 import metaconfig.ConfDecoder.canBuildFromAnyMapWithStringKey
 import metaconfig.generic.Surface
 import metaconfig.{ConfDecoder, Configured}
@@ -34,16 +35,25 @@ class UnionRewrite(config: UnionRewriteConfig) extends SemanticRule("UnionRewrit
   override val isRewrite = true
 
   override def fix(implicit doc: SemanticDocument): Patch = {
+    val ruleId = "UnionRewrite"
+    val explanation = "unionAll is deprecated; use union instead (identical semantics)."
+
+    def renamed(nameTree: Tree, replacement: String): Patch =
+      RuleFinding.report(
+        RuleChange(ruleId, explanation, s"Rewrote to $replacement", nameTree),
+        Patch.replaceTree(nameTree, replacement)
+      )
+
     def matchOnTree(t: Tree): Patch = {
       t.collect {
         case Term.Apply(
             Term.Select(_, deprecated @ Term.Name(name)),
             _
             ) if config.deprecatedMethod.contains(name) =>
-          Patch.replaceTree(
-            deprecated,
-            config.deprecatedMethod(name)
-          )
+          renamed(deprecated, config.deprecatedMethod(name))
+        // `"reduce" == name`, not `"reduce".contains(name)`: the latter asked whether
+        // the method name is a SUBSTRING of "reduce", matching `.re(...)`, `.red(...)`,
+        // `.uce(...)` and any other substring of it, on any receiver type.
         case Term.Apply(
             Term.Select(_, _ @Term.Name(name)),
             List(
@@ -56,11 +66,8 @@ class UnionRewrite(config: UnionRewriteConfig) extends SemanticRule("UnionRewrit
                 )
               )
             )
-            ) if "reduce".contains(name) && config.deprecatedMethod.contains(nameAnm) =>
-          Patch.replaceTree(
-            deprecatedAnm,
-            config.deprecatedMethod(nameAnm)
-          )
+            ) if "reduce" == name && config.deprecatedMethod.contains(nameAnm) =>
+          renamed(deprecatedAnm, config.deprecatedMethod(nameAnm))
       }.asPatch
     }
 

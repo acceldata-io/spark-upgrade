@@ -21,3 +21,4 @@ fix.AnsiModeEnabledWarn
 fix.MesosRemovedWarn
 fix.RDDToDatasetMigrationCheck
 fix.RDDToDatasetMigration
+fix.SqlInStringDetect

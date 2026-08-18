@@ -7,7 +7,11 @@ val sparkUpgradeVersion = settingKey[String]("Spark upgrade version")
 lazy val V = _root_.scalafix.sbt.BuildInfo
 inThisBuild(
   List(
-    organization := "com.holdenkarau",
+    // Forked/actively modified at Acceldata for the 2.4.8 -> 3.5.5 migration
+    // effort; org changes accordingly so our published coordinates don't
+    // collide with upstream holdenk releases. Apache-2.0 license + upstream
+    // attribution retained (see `developers` below).
+    organization := "com.acceldata",
     homepage := Some(url("https://github.com/holdenk/spark-auto-upgrade")),
     licenses := List("Apache-2.0" -> url("http://www.apache.org/licenses/LICENSE-2.0")),
     srcSparkVersion := System.getProperty("sparkVersion", "2.4.8"),
