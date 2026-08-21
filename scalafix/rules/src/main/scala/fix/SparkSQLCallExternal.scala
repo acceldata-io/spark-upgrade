@@ -31,7 +31,14 @@ class SparkSQLCallExternal extends SemanticRule("SparkSQLCallExternal") {
   // any structured output anyway (confirmed empirically), so a line-anchored
   // regex over the human-readable format is no less robust here than parsing
   // JSON would be, without the added dependency.
-  private val lintLine = """^L:\s*\d+\s*\|\s*P:\s*\d+\s*\|\s*(\S+)\s*\|""".r
+  // Ends in `.*`, not just the trailing `\|`: matching via `case lintLine(code) =>`
+  // uses `Regex.unapplySeq`, which requires a FULL match of the whole line
+  // (`Matcher.matches`, not `.find`) -- without consuming the rest of the
+  // line (the description text after the last `|`), the match fails
+  // entirely and every lint line is silently dropped (confirmed the hard
+  // way: `stillFlagged` came back empty against real sqlfluff output that
+  // plainly contained a matching line).
+  private val lintLine = """^L:\s*\d+\s*\|\s*P:\s*\d+\s*\|\s*(\S+)\s*\|.*""".r
 
   override def fix(implicit doc: SemanticDocument): Patch = {
     val sparkSQLFunMatch = SymbolMatcher.normalized("org.apache.spark.sql.SparkSession.sql")
