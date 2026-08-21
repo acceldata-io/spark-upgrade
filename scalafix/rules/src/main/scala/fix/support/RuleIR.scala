@@ -176,6 +176,81 @@ object RuleRegistry {
       description = "Reformats a literal SQL string passed to spark.sql(...)/sqlContext.sql(...) with sqlfluff's sparksql dialect, surfacing Spark 3.x SQL-dialect issues sqlfluff can fix automatically. Requires sqlfluff on PATH; falls back to no rewrite if it's unavailable or fails.",
       docLink = "https://docs.sqlfluff.com/en/stable/dialects.html",
       defaultConfidence = "low"
+    ),
+    // Tier 2 / Class A config-injection detectors (2026-08-17 review Part 4;
+    // gap-analysis 2026-08-21 SS2.2): each one names a
+    // spark.sql.legacy.* config in LegacyConfigRegistry that its firing
+    // makes eligible for Phase B's submit-conf injection. Detection-only --
+    // no code rewrite -- by definition of Tier 2 in the tier taxonomy.
+    RuleMeta(
+      ruleId = "UntypedScalaUDFDetect",
+      tier = 2,
+      description = "Flags the deprecated 2-arg functions.udf(AnyRef, DataType) form, which also changed null-handling semantics in Spark 3.0. Feeds spark.sql.legacy.allowUntypedScalaUDF.",
+      docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
+      defaultConfidence = "high"
+    ),
+    RuleMeta(
+      ruleId = "DateTimeFormatPatternValidator",
+      tier = 2,
+      description = "Flags datetime format pattern strings using letters ('hh' without 'a', or 'F') whose meaning changed under Spark 3.0's DateTimeFormatter. Feeds spark.sql.legacy.timeParserPolicy.",
+      docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
+      defaultConfidence = "medium"
+    ),
+    RuleMeta(
+      ruleId = "LooseUpcastDetect",
+      tier = 2,
+      description = "Flags Dataset.as[T] upcasts to an atomic Scala type, which Spark 3.0 validates more strictly and may reject at analysis time. Feeds spark.sql.legacy.doLooseUpcast.",
+      docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
+      defaultConfidence = "medium"
+    ),
+    RuleMeta(
+      ruleId = "PathOptionConflictDetect",
+      tier = 2,
+      description = "Flags a `path` option coexisting with a path argument to load()/save(), which Spark 3.1 rejects instead of silently picking one. Feeds spark.sql.legacy.pathOptionBehavior.enabled.",
+      docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
+      defaultConfidence = "high"
+    ),
+    RuleMeta(
+      ruleId = "HashOnMapTypeDetect",
+      tier = 2,
+      description = "Flags hash()/xxhash64() applied directly to a map(...)/create_map(...) result, which Spark 3.0 rejects instead of hashing. Feeds spark.sql.legacy.allowHashOnMapType.",
+      docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
+      defaultConfidence = "high"
+    ),
+    RuleMeta(
+      ruleId = "EmptyCollectionTypeDetect",
+      tier = 2,
+      description = "Flags no-argument array()/map() calls, which infer NullType element(s) in Spark 3.0 instead of 2.4's StringType. Feeds spark.sql.legacy.createEmptyCollectionUsingStringType.",
+      docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
+      defaultConfidence = "high"
+    ),
+    RuleMeta(
+      ruleId = "MixedIntervalLiteralDetect",
+      tier = 2,
+      description = "Flags a SQL INTERVAL literal mixing year-month and day-time units, which Spark 3.2+ rejects as a single literal. Feeds spark.sql.legacy.interval.enabled.",
+      docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
+      defaultConfidence = "low"
+    ),
+    RuleMeta(
+      ruleId = "ExponentLiteralDetect",
+      tier = 2,
+      description = "Flags a scientific-notation numeric literal in SQL text, which parses as Double from Spark 3.0 onward instead of 2.4's Decimal. Feeds spark.sql.legacy.exponentLiteralAsDecimal.enabled.",
+      docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
+      defaultConfidence = "medium"
+    ),
+    RuleMeta(
+      ruleId = "GroupingIdTypeDetect",
+      tier = 2,
+      description = "Flags grouping_id() call sites -- its result is Long from Spark 3.0 onward, not Int. Feeds spark.sql.legacy.integerGroupingId.",
+      docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
+      defaultConfidence = "medium"
+    ),
+    RuleMeta(
+      ruleId = "CountStarWithTableIdentDetect",
+      tier = 2,
+      description = "Flags count(tbl.*) in SQL text, which Spark 3.0's parser rejects -- only bare count(*) is allowed. Feeds spark.sql.legacy.allowStarWithSingleTableIdentifierInCount.",
+      docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
+      defaultConfidence = "high"
     )
   )
 

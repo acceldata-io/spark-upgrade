@@ -22,3 +22,13 @@ fix.MesosRemovedWarn
 fix.RDDToDatasetMigrationCheck
 fix.RDDToDatasetMigration
 fix.SqlInStringDetect
+fix.UntypedScalaUDFDetect
+fix.DateTimeFormatPatternValidator
+fix.LooseUpcastDetect
+fix.PathOptionConflictDetect
+fix.HashOnMapTypeDetect
+fix.EmptyCollectionTypeDetect
+fix.MixedIntervalLiteralDetect
+fix.ExponentLiteralDetect
+fix.GroupingIdTypeDetect
+fix.CountStarWithTableIdentDetect
