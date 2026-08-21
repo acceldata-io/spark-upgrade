@@ -10,7 +10,7 @@ object OldQuery {
     s.sql("""select
       cast(a as int),
       cast(b as int)
-    from fart_tbl""")
+    from fart_tbl""") // assert: SparkSQLCallExternal
     // We can't auto rewrite this :( easily.
     val q = "SELECT * FROM FARTS LIMIT 1"
     s.sql(q)

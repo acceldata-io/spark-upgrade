@@ -11,6 +11,6 @@ object RDDToDatasetMigrationTypedOrigin {
     import spark.implicits._
     val a = spark.createDataset[Int](Seq(1, 2, 3))
     val e = spark.createDataset[Int](Seq())
-    val r = a.union(spark.createDataset[Int](Seq(4))).union(e).collect()
+    val r = a.union(spark.createDataset[Int](Seq(4))).union(e).collect() 
   }
 }

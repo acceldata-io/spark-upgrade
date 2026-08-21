@@ -1,5 +1,6 @@
 package fix
 
+import fix.support.{RuleChange, RuleFinding}
 import scalafix.v1._
 import scala.meta._
 
@@ -12,13 +13,13 @@ class ScalaTestExtendsFix
   override val isRewrite = true
 
   override def fix(implicit doc: SyntacticDocument): Patch = {
-    println("Magicz!")
     doc.tree.collect { case v: Type.Name =>
-      println(v)
       if (v.toString == "FunSuite") {
-        Patch.replaceTree(v, "AnyFunSuite")
+        RuleFinding.reportSyntactic(
+          RuleChange("ScalaTestExtendsFix", "ScalaTest 3.1 renamed FunSuite to AnyFunSuite.", "Rewrote to AnyFunSuite", v),
+          Patch.replaceTree(v, "AnyFunSuite")
+        )
       } else {
-        println(s"No change to $v")
         Patch.empty
       }
     }.asPatch

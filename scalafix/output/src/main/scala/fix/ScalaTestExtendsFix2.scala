@@ -1,9 +1,9 @@
 trait Farts {
 }
 
-trait AnyFunSuite {
+trait AnyFunSuite { 
 }
 
-class OldTest2 extends AnyFunSuite with Farts {
+class OldTest2 extends AnyFunSuite with Farts { 
   val a = 1
 }

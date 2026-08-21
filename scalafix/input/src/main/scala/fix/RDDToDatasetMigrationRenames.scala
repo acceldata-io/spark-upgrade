@@ -12,6 +12,6 @@ object RDDToDatasetMigrationRenames {
     val b = spark.sparkContext.parallelize(Seq(2, 3, 4))
     // intersection -> intersect (rename); union stays union, but its operand must
     // also trace to a convertible origin (the inline parallelize does).
-    val r = a.intersection(b).union(spark.sparkContext.parallelize(Seq(3))).collect()
+    val r = a.intersection(b).union(spark.sparkContext.parallelize(Seq(3))).collect() // assert: RDDToDatasetMigration
   }
 }

@@ -3,11 +3,11 @@
  */
 import org.apache.spark._
 import org.apache.spark.sql._
-import org.apache.spark.sql.hive.HiveContext
+import org.apache.spark.sql.hive.HiveContext // assert: MigrateHiveContext
 
 object BadHiveContextMagic {
-  def hiveContextFunc(sc: SparkContext): HiveContext = {
-    val hiveContext1 = new HiveContext(sc)
+  def hiveContextFunc(sc: SparkContext): HiveContext = { // assert: MigrateHiveContext
+    val hiveContext1 = new HiveContext(sc) // assert: MigrateHiveContext
     import hiveContext1.implicits._
     hiveContext1
   }

@@ -13,6 +13,6 @@ object RDDToDatasetMigrationRepeatedImplicits {
 
   def inSource(spark: SparkSession): Unit = {
     import spark.implicits._
-    val out = spark.createDataset(Seq(1, 2, 3)).map(_ + 1).collect()
+    val out = spark.createDataset(Seq(1, 2, 3)).map(_ + 1).collect() 
   }
 }

@@ -6,8 +6,8 @@ object BadEncoderEx {
     // Round trip with toRow and fromRow.
     val stringEncoder = ExpressionEncoder[String]
     val intEncoder = ExpressionEncoder[Int]
-    val row = stringEncoder.createSerializer()("hello world")
-    val decoded = stringEncoder.createDeserializer()(row)
-    val intRow = intEncoder.createSerializer()(1)
+    val row = stringEncoder.createSerializer()("hello world") 
+    val decoded = stringEncoder.createDeserializer()(row) 
+    val intRow = intEncoder.createSerializer()(1) 
   }
 }

@@ -1,5 +1,6 @@
 package fix
 
+import fix.support.{RuleChange, RuleFinding}
 import scalafix.v1._
 import scala.meta._
 
@@ -17,7 +18,15 @@ class MigrateTrigger extends SemanticRule("MigrateTrigger") {
         // Trigger match seems to be matching too widly sometimes?
         case triggerMatcher(e) =>
           if (e.toString.contains("ProcessingTime")) {
-            utils.addImportIfNotPresent(importer"org.apache.spark.sql.streaming.Trigger._")
+            RuleFinding.report(
+              RuleChange(
+                "MigrateTrigger",
+                "org.apache.spark.sql.streaming.ProcessingTime was removed in favor of Trigger.ProcessingTime.",
+                "Added the org.apache.spark.sql.streaming.Trigger._ import.",
+                e
+              ),
+              utils.addImportIfNotPresent(importer"org.apache.spark.sql.streaming.Trigger._")
+            )
           } else {
             None.asPatch
           }

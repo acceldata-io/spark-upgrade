@@ -1,5 +1,6 @@
 package fix
 
+import fix.support.{RuleChange, RuleFinding}
 import scalafix.v1._
 import scala.meta._
 
@@ -15,8 +16,17 @@ class MigrateDeprecatedDataFrameReaderFuns extends SemanticRule("MigrateDeprecat
         case ns @ Term.Apply(jsonReaderMatcher(reader), List(param)) =>
           param match {
             case utils.rddMatcher(rdd) =>
-              (Patch.addLeft(rdd, "session.createDataset(") + Patch.addRight(rdd, ")(Encoders.STRING)") +
-                utils.addImportIfNotPresent(importer"org.apache.spark.sql.Encoders"))
+              val rewrite = Patch.addLeft(rdd, "session.createDataset(") + Patch.addRight(rdd, ")(Encoders.STRING)") +
+                utils.addImportIfNotPresent(importer"org.apache.spark.sql.Encoders")
+              RuleFinding.report(
+                RuleChange(
+                  "MigrateDeprecatedDataFrameReaderFuns",
+                  "DataFrameReader.json(RDD[String]) is deprecated.",
+                  "Wrapped the RDD[String] argument with session.createDataset(...)(Encoders.STRING).",
+                  ns
+                ),
+                rewrite
+              )
             case _ =>
               Patch.empty
           }

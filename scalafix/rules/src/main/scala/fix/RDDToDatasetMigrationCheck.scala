@@ -1,36 +1,21 @@
 package fix
 
+import fix.support.{RuleChange, RuleFinding}
 import scalafix.v1._
 import scala.meta._
 
 /**
- * Reported when an RDD operation is used that does not have a straightforward
- * Dataset/DataFrame equivalent, so the surrounding RDD pipeline can not be
- * migrated to the Dataset API automatically.
+ * Text for an RDD operation that has no straightforward Dataset/DataFrame
+ * equivalent, so the surrounding RDD pipeline can not be migrated to the
+ * Dataset API automatically. Shared with RDDToDatasetMigration's blocked
+ * path -- same reasons, different rule ID on the finding.
  */
-case class RDDMigrationBlocked(tn: Tree, op: String, reason: String)
-    extends Diagnostic {
-  override def position: Position = tn.pos
-
-  override def message: String =
+object RDDMigrationBlockedText {
+  def explanation(op: String, reason: String): String =
     s"RDD operation '$op' blocks an automatic migration to the Dataset/DataFrame " +
-      s"API ($reason). This RDD usage is not simple enough to migrate " +
-      "automatically; migrate it by hand or leave it as an RDD."
-}
+      s"API ($reason)."
 
-/**
- * Reported once per file when *all* of the RDD operations used have a direct
- * Dataset/DataFrame equivalent, i.e. the RDD usage is simple enough that it
- * could all be migrated to the Dataset API.
- */
-case class RDDMigrationPossible(tn: Tree, ops: Seq[String]) extends Diagnostic {
-  override def position: Position = tn.pos
-
-  override def message: String =
-    s"All RDD operations used here (${ops.mkString(", ")}) have direct " +
-      "Dataset/DataFrame equivalents, so this RDD usage is simple enough to " +
-      "migrate to the Dataset API (e.g. start from a Dataset/DataFrame or call " +
-      ".toDS()/.toDF())."
+  val change: String = "No auto-rewrite; migrate it by hand or leave it as an RDD."
 }
 
 /**
@@ -41,12 +26,11 @@ case class RDDMigrationPossible(tn: Tree, ops: Seq[String]) extends Diagnostic {
  * all be migrated to the typed Dataset API:
  *
  *   - If every RDD operation has a direct Dataset/DataFrame equivalent it emits
- *     a single [[RDDMigrationPossible]] lint, flagging the pipeline as a good
- *     candidate for migration.
+ *     a single finding flagging the pipeline as a good candidate for migration.
  *   - If any RDD operation has no simple equivalent (key/pair functions, joins,
- *     zips, custom partitioning, manual aggregations, ...) it emits a
- *     [[RDDMigrationBlocked]] lint at each such operation explaining why the
- *     pipeline can not be migrated automatically.
+ *     zips, custom partitioning, manual aggregations, ...) it emits a finding
+ *     at each such operation explaining why the pipeline can not be migrated
+ *     automatically.
  *
  * Operations are recognised by their resolved symbol owner, so chained calls
  * (e.g. `rdd.map(...).filter(...)`) and the implicitly-converted pair RDD
@@ -176,11 +160,21 @@ class RDDToDatasetMigrationCheck
         blocking.map { case (node, op) =>
           val reason =
             blockingReasons.getOrElse(op, "no known direct Dataset/DataFrame equivalent")
-          Patch.lint(RDDMigrationBlocked(node, op, reason))
+          RuleFinding.report(RuleChange(
+            "RDDToDatasetMigrationCheck",
+            RDDMigrationBlockedText.explanation(op, reason),
+            RDDMigrationBlockedText.change,
+            node
+          ))
         }.asPatch
       } else {
         val opNames = ordered.map { case (_, op) => op }.distinct
-        Patch.lint(RDDMigrationPossible(ordered.head._1, opNames))
+        RuleFinding.report(RuleChange(
+          "RDDToDatasetMigrationCheck",
+          s"All RDD operations used here (${opNames.mkString(", ")}) have direct Dataset/DataFrame equivalents, so this RDD usage is simple enough to migrate to the Dataset API.",
+          "No auto-rewrite; this pipeline is a good candidate for manual migration (or RDDToDatasetMigration, if enabled).",
+          ordered.head._1
+        ))
       }
     }
   }

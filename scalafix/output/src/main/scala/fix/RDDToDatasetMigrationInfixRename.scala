@@ -9,6 +9,6 @@ object RDDToDatasetMigrationInfixRename {
     import spark.implicits._
     val a = spark.createDataset(Seq(1, 2, 3))
     val b = spark.createDataset(Seq(2, 3, 4))
-    val r = (a intersect b).collect()
+    val r = (a intersect b).collect() 
   }
 }

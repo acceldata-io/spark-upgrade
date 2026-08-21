@@ -12,6 +12,6 @@ object RDDToDatasetMigrationInfixRename {
     import spark.implicits._
     val a = spark.sparkContext.parallelize(Seq(1, 2, 3))
     val b = spark.sparkContext.parallelize(Seq(2, 3, 4))
-    val r = (a intersection b).collect()
+    val r = (a intersection b).collect() // assert: RDDToDatasetMigration
   }
 }

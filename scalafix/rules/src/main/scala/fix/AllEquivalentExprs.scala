@@ -1,5 +1,6 @@
 package fix
 
+import fix.support.{RuleChange, RuleFinding}
 import scalafix.v1._
 import scala.meta._
 
@@ -15,7 +16,15 @@ class AllEquivalentExprs extends SemanticRule("AllEquivalentExprs") {
           // This is sketch because were messing with the string repr but it's easier
           // since we only want to replace some of our match.
           val newCall = call.toString.replace(".getAllEquivalentExprs", ".getCommonSubexpressions.map(List(_))")
-          Patch.replaceTree(call, newCall)
+          RuleFinding.report(
+            RuleChange(
+              "AllEquivalentExprs",
+              "EquivalentExpressions.getAllEquivalentExprs was renamed/reshaped to getCommonSubexpressions.",
+              s"Rewrote to $newCall",
+              call
+            ),
+            Patch.replaceTree(call, newCall)
+          )
         case elem @ _ =>
           elem.children match {
             case Nil => Patch.empty

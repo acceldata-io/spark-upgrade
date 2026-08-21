@@ -12,6 +12,6 @@ object RDDToDatasetMigrationUnusedRddImport {
   // would dangle, so the pipeline still migrates.
   def inSource(spark: SparkSession): Unit = {
     import spark.implicits._
-    val out = spark.sparkContext.parallelize(Seq(1, 2, 3)).map(_ + 1).collect()
+    val out = spark.sparkContext.parallelize(Seq(1, 2, 3)).map(_ + 1).collect() // assert: RDDToDatasetMigration
   }
 }

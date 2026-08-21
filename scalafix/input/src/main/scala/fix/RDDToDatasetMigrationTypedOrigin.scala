@@ -14,6 +14,6 @@ object RDDToDatasetMigrationTypedOrigin {
     import spark.implicits._
     val a = spark.sparkContext.parallelize[Int](Seq(1, 2, 3))
     val e = spark.sparkContext.parallelize[Int](Seq())
-    val r = a.union(spark.sparkContext.parallelize[Int](Seq(4))).union(e).collect()
+    val r = a.union(spark.sparkContext.parallelize[Int](Seq(4))).union(e).collect() // assert: RDDToDatasetMigration
   }
 }

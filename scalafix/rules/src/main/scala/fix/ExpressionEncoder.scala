@@ -1,5 +1,6 @@
 package fix
 
+import fix.support.{RuleChange, RuleFinding}
 import scalafix.v1._
 import scala.meta._
 
@@ -16,12 +17,18 @@ class ExpressionEncoder extends SemanticRule("ExpressionEncoder") {
           // This is sketch because were messing with the string repr but it's easier
           // since we only want to replace some of our match.
           val newCall = call.toString.replace(".toRow", ".createSerializer()")
-          Patch.replaceTree(call, newCall)
+          RuleFinding.report(
+            RuleChange("ExpressionEncoder", "ExpressionEncoder.toRow was replaced by createSerializer().", s"Rewrote to $newCall", call),
+            Patch.replaceTree(call, newCall)
+          )
         case fromRowMatcher(call) =>
           // This is sketch because were messing with the string repr but it's easier
           // since we only want to replace some of our match.
           val newCall = call.toString.replace(".fromRow", ".createDeserializer()")
-          Patch.replaceTree(call, newCall)
+          RuleFinding.report(
+            RuleChange("ExpressionEncoder", "ExpressionEncoder.fromRow was replaced by createDeserializer().", s"Rewrote to $newCall", call),
+            Patch.replaceTree(call, newCall)
+          )
         case elem @ _ =>
           elem.children match {
             case Nil => Patch.empty

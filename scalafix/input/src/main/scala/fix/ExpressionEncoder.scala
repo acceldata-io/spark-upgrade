@@ -9,8 +9,8 @@ object BadEncoderEx {
     // Round trip with toRow and fromRow.
     val stringEncoder = ExpressionEncoder[String]
     val intEncoder = ExpressionEncoder[Int]
-    val row = stringEncoder.toRow("hello world")
-    val decoded = stringEncoder.fromRow(row)
-    val intRow = intEncoder.toRow(1)
+    val row = stringEncoder.toRow("hello world") // assert: ExpressionEncoder
+    val decoded = stringEncoder.fromRow(row) // assert: ExpressionEncoder
+    val intRow = intEncoder.toRow(1) // assert: ExpressionEncoder
   }
 }

@@ -24,7 +24,7 @@ object RuleRegistry {
   private val entries: Seq[RuleMeta] = Seq(
     RuleMeta(
       ruleId = "AccumulatorUpgrade",
-      tier = 1,
+      tier = 3,
       description = "SparkContext.accumulator is removed in Spark 3.x; migrate to the typed accumulator API (longAccumulator/doubleAccumulator) or a custom AccumulatorV2.",
       docLink = "https://spark.apache.org/docs/latest/core-migration-guide.html#upgrading-from-core-24-to-30",
       defaultConfidence = "high"
@@ -69,6 +69,112 @@ object RuleRegistry {
       tier = 3,
       description = "Flags spark.sql(...)/sqlContext.sql(...) call sites so in-line SQL can be reviewed separately for Spark 3.x SQL-dialect changes; classifies the query as literal, string-interpolated, or dynamically built.",
       docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
+      defaultConfidence = "low"
+    ),
+    // Everything below was previously in the jar but had no RuleRegistry
+    // entry, so it never ran in Analysis (RuleDiscovery.allRuleIds() is what
+    // enables it there now) and never produced a structured finding even
+    // when it ran in Code Changes -- see RuleFinding.report at each rule's
+    // fire site. Defaulted to Tier 3 (manual review): Phase A auto-applies
+    // any Tier 1 rule with no other safety gate, and none of these have been
+    // exercised through this pipeline before. Promote individually once
+    // proven safe on real repos.
+    RuleMeta(
+      ruleId = "RDDToDatasetMigrationCheck",
+      tier = 3,
+      description = "Checks whether a file's RDD usage is simple enough (every operation has a direct Dataset/DataFrame equivalent) to migrate to the typed Dataset API by hand.",
+      docLink = "https://spark.apache.org/docs/latest/rdd-programming-guide.html",
+      defaultConfidence = "low"
+    ),
+    RuleMeta(
+      ruleId = "RDDToDatasetMigration",
+      tier = 3,
+      description = "Conservatively rewrites an RDD pipeline to the typed Dataset API only when the whole file's RDD usage is guaranteed to compile to the same thing and compute the same result; anything outside that safe surface is logged, not rewritten. See rdd-to-dataset-rewrite-design.md.",
+      docLink = "https://spark.apache.org/docs/latest/rdd-programming-guide.html",
+      defaultConfidence = "medium"
+    ),
+    RuleMeta(
+      ruleId = "MultiLineDatasetReadWarn",
+      tier = 3,
+      description = "Warns that Spark 2.4 and earlier's multi-line text read of Windows line endings (\\r\\n) can leave stray \\r characters; a lineSep of \"\\n\" restores the legacy behavior if it was relied upon.",
+      docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
+      defaultConfidence = "low"
+    ),
+    RuleMeta(
+      ruleId = "MetadataWarnQQ",
+      tier = 3,
+      description = "Since Spark 3.0, Column.name/Column.as always propagate the underlying NamedExpression's metadata instead of freezing it at call time; restore the old behavior with as(alias, metadata) if relied upon.",
+      docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
+      defaultConfidence = "low"
+    ),
+    RuleMeta(
+      ruleId = "ExecutorPluginWarn",
+      tier = 3,
+      description = "org.apache.spark.ExecutorPlugin was removed in Spark 3.0 in favor of org.apache.spark.api.plugin.SparkPlugin; a removed API used anywhere is a hard compile break.",
+      docLink = "https://spark.apache.org/docs/3.0.0/core-migration-guide.html",
+      defaultConfidence = "medium"
+    ),
+    RuleMeta(
+      ruleId = "AllEquivalentExprs",
+      tier = 3,
+      description = "EquivalentExpressions.getAllEquivalentExprs was renamed/reshaped to getCommonSubexpressions; rewrites the call site to the new API.",
+      docLink = "https://spark.apache.org/docs/latest/core-migration-guide.html",
+      defaultConfidence = "low"
+    ),
+    RuleMeta(
+      ruleId = "ExpressionEncoder",
+      tier = 3,
+      description = "ExpressionEncoder.toRow/fromRow were replaced by createSerializer()/createDeserializer(); rewrites call sites to the new API.",
+      docLink = "https://spark.apache.org/docs/latest/core-migration-guide.html",
+      defaultConfidence = "low"
+    ),
+    RuleMeta(
+      ruleId = "MigrateDeprecatedDataFrameReaderFuns",
+      tier = 3,
+      description = "DataFrameReader.json(RDD[String]) is deprecated; rewrites to session.createDataset(rdd)(Encoders.STRING) passed to the string-based json() overload.",
+      docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
+      defaultConfidence = "low"
+    ),
+    RuleMeta(
+      ruleId = "MigrateHiveContext",
+      tier = 3,
+      description = "HiveContext is removed; rewrites construction/getOrCreate call sites and the type reference to SparkSession.builder.enableHiveSupport().getOrCreate().sqlContext, and rewrites the plain-HiveContext import case to SQLContext.",
+      docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
+      defaultConfidence = "low"
+    ),
+    RuleMeta(
+      ruleId = "MigrateTrigger",
+      tier = 3,
+      description = "Structured Streaming's ProcessingTime was removed in favor of Trigger.ProcessingTime/Trigger.Once/Trigger.Continuous; adds the Trigger._ import needed at the call site.",
+      docLink = "https://spark.apache.org/docs/latest/structured-streaming-programming-guide.html",
+      defaultConfidence = "low"
+    ),
+    RuleMeta(
+      ruleId = "ScalaTestExtendsFix",
+      tier = 3,
+      description = "ScalaTest 3.1 renamed FunSuite to AnyFunSuite; rewrites the type reference in an extends clause.",
+      docLink = "https://www.scalatest.org/release_notes/3.1.0",
+      defaultConfidence = "low"
+    ),
+    RuleMeta(
+      ruleId = "ScalaTestImportChange",
+      tier = 3,
+      description = "ScalaTest 3.1 moved several traits (FunSuite family, Matchers) to new packages; rewrites the import/extends-clause call sites to their new names.",
+      docLink = "https://www.scalatest.org/release_notes/3.1.0",
+      defaultConfidence = "low"
+    ),
+    RuleMeta(
+      ruleId = "onFailureFix",
+      tier = 3,
+      description = "Rewrites scala.concurrent.Future#onFailure/onSuccess call sites to onComplete { case Failure(ev) => ... } / onComplete { case Success(sv) => ... }.",
+      docLink = "https://docs.scala-lang.org/overviews/core/futures.html",
+      defaultConfidence = "low"
+    ),
+    RuleMeta(
+      ruleId = "SparkSQLCallExternal",
+      tier = 3,
+      description = "Reformats a literal SQL string passed to spark.sql(...)/sqlContext.sql(...) with sqlfluff's sparksql dialect, surfacing Spark 3.x SQL-dialect issues sqlfluff can fix automatically. Requires sqlfluff on PATH; falls back to no rewrite if it's unavailable or fails.",
+      docLink = "https://docs.sqlfluff.com/en/stable/dialects.html",
       defaultConfidence = "low"
     )
   )
@@ -124,12 +230,15 @@ object FindingsSink {
       case c    => c.toString
     }
 
-  def emit(rc: RuleChange)(implicit doc: SemanticDocument): Unit = sinkPath.foreach { path =>
+  // Takes the input explicitly rather than an implicit SemanticDocument so a
+  // SyntacticRule (which only ever has a SyntacticDocument in scope -- the
+  // two share no common supertype in scalafix.v1) can report findings too.
+  def emit(rc: RuleChange, input: Input): Unit = sinkPath.foreach { path =>
     val pos = rc.position
     val line =
       "{" +
         s""""ruleId":"${jsonEscape(rc.ruleId)}",""" +
-        s""""file":"${jsonEscape(doc.input.syntax)}",""" +
+        s""""file":"${jsonEscape(input.syntax)}",""" +
         s""""line":${pos.startLine + 1},""" +
         s""""column":${pos.startColumn + 1},""" +
         s""""explanation":"${jsonEscape(rc.why)}",""" +
@@ -152,7 +261,14 @@ object FindingsSink {
  */
 object RuleFinding {
   def report(rc: RuleChange, rewrite: Patch = Patch.empty)(implicit doc: SemanticDocument): Patch = {
-    FindingsSink.emit(rc)
+    FindingsSink.emit(rc, doc.input)
+    Seq(Patch.lint(rc), rewrite).asPatch
+  }
+
+  // For the one SyntacticRule in this jar (ScalaTestExtendsFix) -- same
+  // reporting contract, just without requiring semantic (SemanticDB) info.
+  def reportSyntactic(rc: RuleChange, rewrite: Patch = Patch.empty)(implicit doc: SyntacticDocument): Patch = {
+    FindingsSink.emit(rc, doc.input)
     Seq(Patch.lint(rc), rewrite).asPatch
   }
 }

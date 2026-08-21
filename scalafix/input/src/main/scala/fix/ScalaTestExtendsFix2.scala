@@ -4,9 +4,9 @@
 trait Farts {
 }
 
-trait FunSuite {
+trait FunSuite { // assert: ScalaTestExtendsFix
 }
 
-class OldTest2 extends FunSuite with Farts {
+class OldTest2 extends FunSuite with Farts { // assert: ScalaTestExtendsFix
   val a = 1
 }

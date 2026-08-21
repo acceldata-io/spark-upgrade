@@ -1,21 +1,9 @@
 package fix
 
+import fix.support.{RuleChange, RuleFinding}
 import scalafix.v1._
 
 import scala.meta._
-
-/**
- * Reported when a file's RDD usage is migratable to the typed Dataset API but
- * the encoders import is missing, so the rewrite can't run yet.
- */
-case class RDDMigrationNeedsImplicits(tn: Tree) extends Diagnostic {
-  override def position: Position = tn.pos
-
-  override def message: String =
-    "This RDD pipeline is migratable to the Dataset API, but needs " +
-      "`import <session>.implicits._` in scope at this call site for the encoders. " +
-      "Add it and re-run RDDToDatasetMigration to rewrite it automatically."
-}
 
 /**
  * Best-effort automatic RDD -> Dataset rewrite (opt-in, `isRewrite`).
@@ -396,13 +384,37 @@ class RDDToDatasetMigration extends SemanticRule("RDDToDatasetMigration") {
         .getOrElse(Nil)
 
       if (blockers.nonEmpty) {
-        blockers.map { case (n, op, reason) => Patch.lint(RDDMigrationBlocked(n, op, reason)) }.asPatch
+        blockers.map { case (n, op, reason) =>
+          RuleFinding.report(RuleChange(
+            "RDDToDatasetMigration",
+            RDDMigrationBlockedText.explanation(op, reason),
+            RDDMigrationBlockedText.change,
+            n
+          ))
+        }.asPatch
       } else {
         // Per-site, not file-wide: an import inside another method wouldn't put
         // the encoders (or the session name) in scope at this call.
         val missingEncoders = encoderSites(rddOps).filterNot(implicitsInScopeAt)
-        if (missingEncoders.nonEmpty) Patch.lint(RDDMigrationNeedsImplicits(missingEncoders.head))
-        else (originPatches ++ renamePatches).asPatch
+        if (missingEncoders.nonEmpty) {
+          RuleFinding.report(RuleChange(
+            "RDDToDatasetMigration",
+            "This RDD pipeline is migratable to the Dataset API, but needs `import <session>.implicits._` in scope at this call site for the encoders.",
+            "No auto-rewrite; add the implicits import and re-run to rewrite it automatically.",
+            missingEncoders.head
+          ))
+        } else {
+          val rewrite = (originPatches ++ renamePatches).asPatch
+          RuleFinding.report(
+            RuleChange(
+              "RDDToDatasetMigration",
+              "This RDD pipeline is fully migratable to the Dataset API and every safety precondition holds.",
+              "Rewrote RDD origins/renames to their Dataset equivalents.",
+              anchor
+            ),
+            rewrite
+          )
+        }
       }
     }
   }

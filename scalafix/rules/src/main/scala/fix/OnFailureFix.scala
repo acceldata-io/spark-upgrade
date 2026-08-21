@@ -1,5 +1,6 @@
 package fix
 
+import fix.support.{RuleChange, RuleFinding}
 import scalafix.v1._
 import scala.meta._
 
@@ -12,16 +13,18 @@ class OnFailureFix extends SemanticRule("onFailureFix") {
     doc.tree.collect {
       case ns @ Term.Apply(j @ onFailureFunMatch(f), args) =>
         val future = ns.children(0).children(0)
-        List(
+        val rewrite = List(
           Patch.addRight(j, "(ev) }"),
           Patch.replaceTree(j, s"${future}.onComplete { case Error(ev) => ")
-        )
+        ).asPatch
+        RuleFinding.report(RuleChange("onFailureFix", "Future#onFailure was removed; rewritten to onComplete { case Failure(ev) => ... }.", "Rewrote to onComplete", ns), rewrite)
       case ns @ Term.Apply(j @ onSuccessFunMatch(f), args) =>
         val future = ns.children(0).children(0)
-        List(
+        val rewrite = List(
           Patch.addRight(j, "(sv) }"),
           Patch.replaceTree(j, s"${future}.onComplete { case Success(sv) => ")
-        )
-    }.flatten.asPatch
+        ).asPatch
+        RuleFinding.report(RuleChange("onFailureFix", "Future#onSuccess was removed; rewritten to onComplete { case Success(sv) => ... }.", "Rewrote to onComplete", ns), rewrite)
+    }.asPatch
   }
 }

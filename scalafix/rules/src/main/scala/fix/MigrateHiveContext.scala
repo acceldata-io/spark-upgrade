@@ -1,9 +1,12 @@
 package fix
 
+import fix.support.{RuleChange, RuleFinding}
 import scalafix.v1._
 import scala.meta._
 
 class MigrateHiveContext extends SemanticRule("MigrateHiveContext") {
+
+  private val explanation = "HiveContext is removed; SparkSession.builder().enableHiveSupport() is the Spark 3.x entry point."
 
   override def fix(implicit doc: SemanticDocument): Patch = {
     val hiveSymbolMatcher = SymbolMatcher.normalized("org.apache.spark.sql.hive.HiveContext")
@@ -16,7 +19,7 @@ class MigrateHiveContext extends SemanticRule("MigrateHiveContext") {
         case ns @ Term.New(Init(initArgs)) =>
           initArgs match {
             case (hiveSymbolMatcher(_), _, _) =>
-              List(
+              val rewrite = List(
                 Patch.replaceTree(
                   ns,
                   newCreateHive),
@@ -24,10 +27,11 @@ class MigrateHiveContext extends SemanticRule("MigrateHiveContext") {
                   // Patch.addGlobalImport(importer"org.apache.spark.sql.SparkSession")
                 utils.addImportIfNotPresent(importer"org.apache.spark.sql.SparkSession")
               ).asPatch
+              RuleFinding.report(RuleChange("MigrateHiveContext", explanation, s"Rewrote to $newCreateHive", ns), rewrite)
             case _ => Patch.empty
           }
         case ns @ Term.Apply(hiveGetOrCreateMatcher(_), _) =>
-          List(
+          val rewrite = List(
             Patch.replaceTree(
               ns,
               newCreateHive),
@@ -35,11 +39,12 @@ class MigrateHiveContext extends SemanticRule("MigrateHiveContext") {
               // Patch.addGlobalImport(importer"org.apache.spark.sql.SparkSession")
               utils.addImportIfNotPresent(importer"org.apache.spark.sql.SparkSession")
           ).asPatch
+          RuleFinding.report(RuleChange("MigrateHiveContext", explanation, s"Rewrote to $newCreateHive", ns), rewrite)
 
         // HiveContext type name rewrite to SQLContext
         // There should be a way to combine these two rules right?
         // Ideally we could rewrite the import to SqlContext symbol.
-        case Import(List(
+        case imp @ Import(List(
           Importer(Term.Select(Term.Select(Term.Select(
             Term.Select(Term.Name("org"), Term.Name("apache")),
             Term.Name("spark")),
@@ -49,21 +54,23 @@ class MigrateHiveContext extends SemanticRule("MigrateHiveContext") {
           // Remove HiveContext it's deprecated
           hiveImports.collect {
             case i @ Importee.Name(Name("HiveContext")) =>
-              List(
+              val rewrite = List(
                 Patch.removeImportee(i),
                 utils.addImportIfNotPresent(importer"org.apache.spark.sql.SQLContext")
                 // TODO add SQLContext import if missing -- addGlobalImport is broken
               ).asPatch
+              RuleFinding.report(RuleChange("MigrateHiveContext", explanation, "Removed the HiveContext import; added SQLContext.", imp), rewrite)
             case i @ Importee.Rename(Name("HiveContext"), _) =>
-              List(
+              val rewrite = List(
                 Patch.removeImportee(i),
                 utils.addImportIfNotPresent(importer"org.apache.spark.sql.SQLContext")
                 // TODO add SQLContext import if missing -- addGlobalImport is broken
               ).asPatch
+              RuleFinding.report(RuleChange("MigrateHiveContext", explanation, "Removed the HiveContext import; added SQLContext.", imp), rewrite)
             case _ => Patch.empty
           }.asPatch
         case hiveSymbolMatcher(h) =>
-          Patch.replaceTree(h, "SQLContext")
+          RuleFinding.report(RuleChange("MigrateHiveContext", explanation, "Rewrote to SQLContext", h), Patch.replaceTree(h, "SQLContext"))
         case elem @ _ =>
           elem.children match {
             case Nil => Patch.empty
