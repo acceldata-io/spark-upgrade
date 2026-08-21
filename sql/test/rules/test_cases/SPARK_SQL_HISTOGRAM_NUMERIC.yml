@@ -1,0 +1,15 @@
+rule: HISTOGRAMNUMERIC_L007
+
+histogram_numeric_flagged:
+  configs:
+    core:
+      dialect: sparksql
+  fail_str: |
+    SELECT histogram_numeric(amount, 5) FROM t
+
+other_function_ok:
+  configs:
+    core:
+      dialect: sparksql
+  pass_str: |
+    SELECT sum(amount) FROM t

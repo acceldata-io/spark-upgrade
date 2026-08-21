@@ -1,0 +1,15 @@
+rule: TRANSFORMDELIM_L012
+
+transform_using_flagged:
+  configs:
+    core:
+      dialect: sparksql
+  fail_str: |
+    SELECT TRANSFORM (a, b) USING 'script.py' FROM t
+
+plain_select_ok:
+  configs:
+    core:
+      dialect: sparksql
+  pass_str: |
+    SELECT a, b FROM t

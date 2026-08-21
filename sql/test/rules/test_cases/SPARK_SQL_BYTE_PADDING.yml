@@ -1,0 +1,22 @@
+rule: BYTEPADDING_L008
+
+lpad_flagged:
+  configs:
+    core:
+      dialect: sparksql
+  fail_str: |
+    SELECT lpad(col, 10, '0') FROM t
+
+rpad_flagged:
+  configs:
+    core:
+      dialect: sparksql
+  fail_str: |
+    SELECT rpad(col, 10, '0') FROM t
+
+other_function_ok:
+  configs:
+    core:
+      dialect: sparksql
+  pass_str: |
+    SELECT trim(col) FROM t

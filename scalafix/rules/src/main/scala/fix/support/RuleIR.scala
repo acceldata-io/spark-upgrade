@@ -173,7 +173,7 @@ object RuleRegistry {
     RuleMeta(
       ruleId = "SparkSQLCallExternal",
       tier = 3,
-      description = "Reformats a literal SQL string passed to spark.sql(...)/sqlContext.sql(...) with sqlfluff's sparksql dialect, surfacing Spark 3.x SQL-dialect issues sqlfluff can fix automatically. Requires sqlfluff on PATH; falls back to no rewrite if it's unavailable or fails.",
+      description = "Runs the sqlfluff sparksql-upgrade plugin's Family K rule set (13 rules -- CAST, reserved properties, CHAR, format_string, EXTRACT SECOND, percentile_approx, GLOBAL TEMP VIEW, histogram_numeric, lpad/rpad, to_binary/unbase64, CTE precedence, PARTITION literals, TRANSFORM) against a literal SQL string passed to spark.sql(...)/sqlContext.sql(...): auto-rewrites what's fix-compatible, reports the rest as findings. Requires sqlfluff + the plugin on PATH; falls back to no findings if unavailable or if the process fails.",
       docLink = "https://docs.sqlfluff.com/en/stable/dialects.html",
       defaultConfidence = "low"
     ),

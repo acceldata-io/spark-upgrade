@@ -523,3 +523,245 @@ class Rule_SPARKSQL_L005(BaseRule):
                 )
 
         return None
+
+
+def _function_name(context: RuleContext) -> Optional[str]:
+    """Shared helper: the upper-cased function name of a `function` segment.
+
+    Every rule above that matches on function name (SPARKSQLCAST_L001,
+    FORMATSTRONEINDEX_L004, SPARKSQL_L004/L005) duplicated this same
+    children-walk; factored out here for the "just flag any usage of this
+    function" rules below, which have no fix to offer and so don't need the
+    rest of that duplicated bracketed/argument-walking logic.
+    """
+    functional_context = FunctionalContext(context)
+    children = functional_context.segment.children()
+    function_name_segs = children.first(sp.is_type("function_name")).children().first(
+        sp.is_type("function_name_identifier")
+    )
+    if not function_name_segs:
+        return None
+    return function_name_segs[0].raw.upper().strip()
+
+
+class Rule_HISTOGRAMNUMERIC_L007(BaseRule):
+    """Spark 3.3 histogram_numeric's output element type changed.
+
+    ``histogram_numeric(expr, nb)`` returns an array of (x, y) structs. Before
+    Spark 3.3 the ``x`` field was always ``DoubleType``; from 3.3 onward it
+    matches the input expression's own numeric type. Downstream code that
+    assumes ``DoubleType`` (a cast, a UDF signature, a schema check) can break
+    silently rather than throw, so this is flag-only -- there's no legacy
+    config to restore the old output type, and there's nothing here safe to
+    rewrite automatically.
+
+    **Flagged**
+
+    .. code-block:: sql
+
+        SELECT histogram_numeric(amount, 5) FROM t
+    """
+
+    groups = ("all",)
+    crawl_behaviour = SegmentSeekerCrawler({"function"})
+    is_fix_compatible = False
+
+    def _eval(self, context: RuleContext) -> Optional[LintResult]:
+        if _function_name(context) == "HISTOGRAM_NUMERIC":
+            return LintResult(
+                anchor=context.segment,
+                description="histogram_numeric(...)'s output element type matches the input "
+                "expression's numeric type from Spark 3.3 onward (was always DoubleType before). "
+                "Verify any downstream code that assumes DoubleType. See "
+                "https://spark.apache.org/docs/latest/sql-migration-guide.html",
+            )
+        return None
+
+
+class Rule_BYTEPADDING_L008(BaseRule):
+    """Spark 3.3 added a BINARY-argument overload to lpad/rpad.
+
+    ``lpad``/``rpad`` gained an overload for ``BINARY`` input in Spark 3.3,
+    which pads with a byte sequence rather than characters -- if the first
+    argument's type is ambiguous or was relying on an implicit cast to
+    STRING, the result can differ. Flag-only: telling STRING from BINARY
+    apart needs the argument's resolved type, which isn't available from the
+    SQL text alone.
+
+    **Flagged**
+
+    .. code-block:: sql
+
+        SELECT lpad(col, 10, '0') FROM t
+    """
+
+    groups = ("all",)
+    crawl_behaviour = SegmentSeekerCrawler({"function"})
+    is_fix_compatible = False
+
+    def _eval(self, context: RuleContext) -> Optional[LintResult]:
+        function_name = _function_name(context)
+        if function_name in ("LPAD", "RPAD"):
+            return LintResult(
+                anchor=context.segment,
+                description=f"{function_name.lower()}(...) gained a BINARY-argument overload in "
+                "Spark 3.3 with byte-sequence (not character) padding semantics. Verify the first "
+                "argument's type if it might be BINARY. See "
+                "https://spark.apache.org/docs/latest/sql-migration-guide.html",
+            )
+        return None
+
+
+class Rule_BINARYCONV_L009(BaseRule):
+    """Spark 3.3/3.4 to_binary/unbase64 now throw on malformed input.
+
+    ``to_binary(str, fmt)`` (3.3) and ``unbase64`` (3.4, for a `fmt` other
+    than the default) now raise on malformed input instead of returning
+    NULL. Data-dependent (Class B-shaped: exposure is certain, whether it
+    actually throws depends on the data), so flag-only rather than a
+    rewrite or a config injection -- there's no legacy config that restores
+    the old null-on-error behavior for these two functions specifically.
+
+    **Flagged**
+
+    .. code-block:: sql
+
+        SELECT to_binary(col, 'base64') FROM t
+        SELECT unbase64(col) FROM t
+    """
+
+    groups = ("all",)
+    crawl_behaviour = SegmentSeekerCrawler({"function"})
+    is_fix_compatible = False
+
+    def _eval(self, context: RuleContext) -> Optional[LintResult]:
+        function_name = _function_name(context)
+        if function_name in ("TO_BINARY", "UNBASE64"):
+            return LintResult(
+                anchor=context.segment,
+                description=f"{function_name.lower()}(...) now raises on malformed input instead "
+                "of returning NULL (Spark 3.3/3.4). Whether this actually fires depends on the "
+                "data -- review error handling around this call. See "
+                "https://spark.apache.org/docs/latest/sql-migration-guide.html",
+            )
+        return None
+
+
+class Rule_CTEPRECEDENCE_L010(BaseRule):
+    """Spark 3.0 changed which CTE wins when an inner WITH shadows an outer one.
+
+    A nested ``WITH`` clause defining a CTE with the same name as an
+    enclosing one used to resolve to the OUTER definition; Spark 3.0 (and
+    ANSI SQL) resolves to the INNER one instead
+    (``spark.sql.legacy.ctePrecedencePolicy``). Detected structurally: any
+    ``common_table_expression`` whose name also names an ANCESTOR
+    ``common_table_expression`` in the same query is exactly the shape that
+    changed meaning.
+
+    **Flagged**
+
+    .. code-block:: sql
+
+        WITH t AS (SELECT 1),
+             q AS (WITH t AS (SELECT 2) SELECT * FROM t)
+        SELECT * FROM q
+    """
+
+    groups = ("all",)
+    crawl_behaviour = SegmentSeekerCrawler({"common_table_expression"})
+    is_fix_compatible = False
+
+    @staticmethod
+    def _cte_name(segment) -> Optional[str]:
+        name_seg = segment.get_child("naked_identifier") or segment.get_child("quoted_identifier")
+        return name_seg.raw.lower().strip('"').strip("'") if name_seg is not None else None
+
+    def _eval(self, context: RuleContext) -> Optional[LintResult]:
+        # The OUTER definition with the same name is a SIBLING of an
+        # ancestor `with_compound_statement`, not an ancestor itself (the
+        # parse tree nests the inner WITH inside the outer CTE's own body,
+        # it doesn't nest CTEs inside each other directly) -- so this walks
+        # every enclosing WITH clause and checks its direct CTE children,
+        # not just the literal ancestor chain.
+        name = self._cte_name(context.segment)
+        if name is None:
+            return None
+        for ancestor in context.parent_stack:
+            if not ancestor.is_type("with_compound_statement"):
+                continue
+            for cte in ancestor.get_children("common_table_expression"):
+                if cte is context.segment:
+                    continue
+                if self._cte_name(cte) == name:
+                    return LintResult(
+                        anchor=context.segment,
+                        description=f'CTE "{name}" shadows an enclosing CTE of the same name. Spark 3.0 '
+                        "resolves references to the INNER definition; 2.4 resolved to the OUTER one. "
+                        "Rename one of the two, or inject spark.sql.legacy.ctePrecedencePolicy=LEGACY "
+                        "to restore the old resolution order. See "
+                        "https://spark.apache.org/docs/latest/sql-migration-guide.html",
+                    )
+        return None
+
+
+class Rule_TYPEDPARTITION_L011(BaseRule):
+    """Spark 3.0 requires typed literals for some partition spec values.
+
+    Untyped literal partition values that don't cleanly coerce to the
+    partition column's type are handled more strictly from Spark 3.0 onward.
+    Detected coarsely -- any ``PARTITION (...)`` clause -- since telling
+    which specific literals are affected needs the target table's partition
+    column types, not just the SQL text.
+
+    **Flagged**
+
+    .. code-block:: sql
+
+        INSERT INTO t PARTITION (dt='2020-01-01') SELECT * FROM s
+    """
+
+    groups = ("all",)
+    crawl_behaviour = SegmentSeekerCrawler({"keyword"})
+    is_fix_compatible = False
+
+    def _eval(self, context: RuleContext) -> Optional[LintResult]:
+        if context.segment.raw_upper == "PARTITION":
+            return LintResult(
+                anchor=context.segment,
+                description="PARTITION (...) clause found -- Spark 3.0 handles partition literal "
+                "values that don't cleanly coerce to the column's type more strictly. Verify the "
+                "literal types against the target table's partition column types. See "
+                "https://spark.apache.org/docs/latest/sql-migration-guide.html",
+            )
+        return None
+
+
+class Rule_TRANSFORMDELIM_L012(BaseRule):
+    """Spark 3.0 changed TRANSFORM's default row/field delimiters and schema inference.
+
+    ``SELECT TRANSFORM(...) USING 'script'`` (Hive-style scripting transform)
+    changed its default delimiters and no-``AS``-clause output schema
+    inference in Spark 3.0. Detected coarsely -- any ``TRANSFORM`` clause --
+    since verifying whether the specific delimiter/schema defaults in use
+    actually changed behavior needs the script's own I/O format, not just
+    the SQL text.
+
+    **Flagged**
+
+    .. code-block:: sql
+
+        SELECT TRANSFORM (a, b) USING 'script.py' FROM t
+    """
+
+    groups = ("all",)
+    crawl_behaviour = SegmentSeekerCrawler({"transform_clause"})
+    is_fix_compatible = False
+
+    def _eval(self, context: RuleContext) -> Optional[LintResult]:
+        return LintResult(
+            anchor=context.segment,
+            description="TRANSFORM (...) USING '...' found -- Spark 3.0 changed its default "
+            "row/field delimiters and no-AS-clause output schema inference. Verify against the "
+            "script's actual I/O format. See "
+            "https://spark.apache.org/docs/latest/sql-migration-guide.html",
+        )

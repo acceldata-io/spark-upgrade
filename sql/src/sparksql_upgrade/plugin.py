@@ -20,6 +20,12 @@ def get_rules() -> List[BaseRule]:
         Rule_SPARKSQL_L004,
         Rule_SPARKSQL_L005,
         Rule_GLOBALTEMPVIEW_L006,
+        Rule_HISTOGRAMNUMERIC_L007,
+        Rule_BYTEPADDING_L008,
+        Rule_BINARYCONV_L009,
+        Rule_CTEPRECEDENCE_L010,
+        Rule_TYPEDPARTITION_L011,
+        Rule_TRANSFORMDELIM_L012,
     )
 
     return [
@@ -30,6 +36,12 @@ def get_rules() -> List[BaseRule]:
         Rule_SPARKSQL_L004,
         Rule_SPARKSQL_L005,
         Rule_GLOBALTEMPVIEW_L006,
+        Rule_HISTOGRAMNUMERIC_L007,
+        Rule_BYTEPADDING_L008,
+        Rule_BINARYCONV_L009,
+        Rule_CTEPRECEDENCE_L010,
+        Rule_TYPEDPARTITION_L011,
+        Rule_TRANSFORMDELIM_L012,
     ]
 
 

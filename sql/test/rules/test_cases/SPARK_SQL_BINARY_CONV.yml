@@ -1,0 +1,22 @@
+rule: BINARYCONV_L009
+
+to_binary_flagged:
+  configs:
+    core:
+      dialect: sparksql
+  fail_str: |
+    SELECT to_binary(col, 'base64') FROM t
+
+unbase64_flagged:
+  configs:
+    core:
+      dialect: sparksql
+  fail_str: |
+    SELECT unbase64(col) FROM t
+
+other_function_ok:
+  configs:
+    core:
+      dialect: sparksql
+  pass_str: |
+    SELECT base64(col) FROM t

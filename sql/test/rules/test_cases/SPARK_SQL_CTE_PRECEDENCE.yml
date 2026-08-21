@@ -1,0 +1,22 @@
+rule: CTEPRECEDENCE_L010
+
+nested_cte_shadow_flagged:
+  configs:
+    core:
+      dialect: sparksql
+  fail_str: |
+    WITH t AS (SELECT 1), q AS (WITH t AS (SELECT 2) SELECT * FROM t) SELECT * FROM q
+
+distinct_cte_names_ok:
+  configs:
+    core:
+      dialect: sparksql
+  pass_str: |
+    WITH t AS (SELECT 1), q AS (SELECT * FROM t) SELECT * FROM q
+
+single_cte_ok:
+  configs:
+    core:
+      dialect: sparksql
+  pass_str: |
+    WITH t AS (SELECT 1) SELECT * FROM t

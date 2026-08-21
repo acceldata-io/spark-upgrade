@@ -1,0 +1,15 @@
+rule: TYPEDPARTITION_L011
+
+insert_partition_flagged:
+  configs:
+    core:
+      dialect: sparksql
+  fail_str: |
+    INSERT INTO t PARTITION (dt='2020-01-01') SELECT * FROM s
+
+no_partition_ok:
+  configs:
+    core:
+      dialect: sparksql
+  pass_str: |
+    INSERT INTO t SELECT * FROM s

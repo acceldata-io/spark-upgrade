@@ -2,57 +2,95 @@ package fix
 
 import java.io._
 
-
 import fix.support.{RuleChange, RuleFinding}
 import scalafix.v1._
 import scala.meta._
 import scala.util.Try
-import sys.process._
+import scala.sys.process._
 
 class SparkSQLCallExternal extends SemanticRule("SparkSQLCallExternal") {
+
+  // The full Family K rule set this fork's sqlfluff plugin (../../../sql,
+  // package sqlfluff-plugin-sparksql-upgrade) implements. Explicit allowlist
+  // rather than plain `sqlfluff fix`/`sqlfluff lint` with no `--rules`:
+  // unrestricted, sqlfluff also applies/reports its own generic SQL style
+  // rules, which would get misattributed to a Spark migration fix
+  // (gap-analysis 2026-08-21 SS3.4).
+  private val ruleCodes = Seq(
+    "SPARKSQLCAST_L001", "RESERVEDROPERTIES_L002", "NOCHARS_L003", "FORMATSTRONEINDEX_L004",
+    "SPARKSQL_L004", "SPARKSQL_L005", "GLOBALTEMPVIEW_L006", "HISTOGRAMNUMERIC_L007",
+    "BYTEPADDING_L008", "BINARYCONV_L009", "CTEPRECEDENCE_L010", "TYPEDPARTITION_L011",
+    "TRANSFORMDELIM_L012"
+  ).mkString(",")
+
+  // e.g. "L:   1 | P:   8 | HISTOGRAMNUMERIC_L007 | histogram_numeric(...)..."
+  // -- sqlfluff's human-readable lint format. Not `--format json`: the rules
+  // module has no JSON library dependency (deliberately lightweight, like
+  // DependencyAnalyzer's own regex-over-text approach on the Scala side),
+  // and several of the plugin's rules print debug lines to stdout ahead of
+  // any structured output anyway (confirmed empirically), so a line-anchored
+  // regex over the human-readable format is no less robust here than parsing
+  // JSON would be, without the added dependency.
+  private val lintLine = """^L:\s*\d+\s*\|\s*P:\s*\d+\s*\|\s*(\S+)\s*\|""".r
 
   override def fix(implicit doc: SemanticDocument): Patch = {
     val sparkSQLFunMatch = SymbolMatcher.normalized("org.apache.spark.sql.SparkSession.sql")
     val utils = new Utils()
 
-    // sqlfluff is an optional external formatter -- not every environment
-    // this jar runs in has it installed. Before this, a missing/failing
-    // `sqlfluff` threw an IOException straight out of `fix`, which scalafix
-    // reports as `ScalafixFailed: UnexpectedError` and fails the WHOLE
-    // scalafixAll run -- every rule, every file -- over one SQL literal this
-    // rule couldn't reformat. Same class of bug as AccumulatorUpgrade's
-    // non-exhaustive match: one rule's failure shouldn't take down the run.
-    def reformatted(s: Lit.String): Option[String] = Try {
-      val f = File.createTempFile("magic", ".sql")
-      f.deleteOnExit()
-      val bw = new BufferedWriter(new FileWriter(f))
-      bw.write(s.value.toString)
-      bw.close()
-      val strToRun = s"sqlfluff  fix --dialect sparksql -f ${f.toPath}"
-      println(s"Running ${strToRun}")
-      val ret = strToRun.!
-      println(ret)
-      scala.io.Source.fromFile(f).mkString
-    }.toOption
+    // sqlfluff is an optional external tool -- not every environment this
+    // jar runs in has it installed. A missing/failing `sqlfluff` must not
+    // throw out of `fix`: that would fail the WHOLE scalafixAll run over
+    // one SQL literal this rule couldn't process. Same class of bug as
+    // AccumulatorUpgrade's non-exhaustive match. `lineStream_!` (not `!!`)
+    // deliberately: sqlfluff exits non-zero whenever it finds/reports
+    // anything at all, which is the NORMAL case this rule exists to
+    // capture, not a failure -- `!!` throws on any non-zero exit and would
+    // discard exactly the output this rule needs. `lineStream_!`, not
+    // `lazyLines_!`, since this module cross-builds for 2.11/2.12/2.13 and
+    // `lazyLines_!` doesn't exist before 2.13.
+    def sqlfluffOutput(args: Seq[String], sqlFile: File): Option[String] =
+      Try(Process(Seq("sqlfluff") ++ args ++ Seq("--dialect", "sparksql", "--rules", ruleCodes, sqlFile.toPath.toString)).lineStream_!.mkString("\n")).toOption
+
+    // Runs `fix` (applies whatever the plugin's fix-compatible rules can
+    // rewrite, in place) then `lint` on the result (to see what's still
+    // flagged -- the detect-only rules, which `fix` never touches). Returns
+    // (rewritten SQL text, iff it actually changed; rule codes still
+    // flagged after fixing).
+    def analyze(original: String, sqlFile: File): (Option[String], Set[String]) = {
+      sqlfluffOutput(Seq("fix", "-f"), sqlFile)
+      val fixed = Try(scala.io.Source.fromFile(sqlFile).mkString).toOption
+      val stillFlagged = sqlfluffOutput(Seq("lint"), sqlFile) match {
+        case Some(output) => output.linesIterator.collect { case lintLine(code) => code }.toSet
+        case None => Set.empty[String]
+      }
+      // We don't care about whitespace-only changes.
+      val rewritten = fixed.filter(newSQL => newSQL.filterNot(_.isWhitespace) != original.filterNot(_.isWhitespace))
+      (rewritten, stillFlagged)
+    }
 
     def matchOnTree(e: Tree): Patch = {
       e match {
-        // non-named accumulator
-        case ns @ Term.Apply(j @ sparkSQLFunMatch(f), params) =>
-          // Find the spark context for rewriting
+        case Term.Apply(sparkSQLFunMatch(_), params) =>
           params match {
             case List(param) =>
               param match {
-                case s @ Lit.String(_) =>
-                  reformatted(s) match {
-                    // We don't care about whitespace only changes.
-                    case Some(newSQL) if newSQL.filterNot(_.isWhitespace) != s =>
-                      // Anchored at the END of the (possibly multi-line) string
-                      // literal, not its start: a `// assert:` testkit comment
-                      // can't be placed inside the literal without corrupting
-                      // the SQL text, so it has to land on the line the
-                      // literal closes on, not the line it opens on.
-                      val endPos = Position.Range(param.pos.input, param.pos.end, param.pos.end)
+                case Lit.String(sql) =>
+                  val f = File.createTempFile("magic", ".sql")
+                  f.deleteOnExit()
+                  val bw = new BufferedWriter(new FileWriter(f))
+                  bw.write(sql)
+                  bw.close()
+                  val (rewritten, stillFlagged) = analyze(sql, f)
+
+                  // Anchored at the END of the (possibly multi-line) string
+                  // literal, not its start: a `// assert:` testkit comment
+                  // can't be placed inside the literal without corrupting
+                  // the SQL text, so it has to land on the line the literal
+                  // closes on, not the line it opens on.
+                  val endPos = Position.Range(param.pos.input, param.pos.end, param.pos.end)
+
+                  val rewritePatch = rewritten match {
+                    case Some(newSQL) =>
                       RuleFinding.report(
                         RuleChange(
                           "SparkSQLCallExternal",
@@ -62,9 +100,21 @@ class SparkSQLCallExternal extends SemanticRule("SparkSQLCallExternal") {
                         ),
                         Patch.replaceTree(param, "\"\"\"" + newSQL + "\"\"\"")
                       )
-                    case _ =>
-                      Patch.empty
+                    case None => Patch.empty
                   }
+                  val detectPatch =
+                    if (stillFlagged.isEmpty) Patch.empty
+                    else
+                      RuleFinding.report(
+                        RuleChange(
+                          "SparkSQLCallExternal",
+                          s"sqlfluff flagged this SQL for: ${stillFlagged.toSeq.sorted.mkString(", ")}. " +
+                            "See spark-upgrade/sql's rule docs (sparksql_upgrade/rules.py) for what changed and why.",
+                          "No auto-rewrite; review manually.",
+                          endPos
+                        )
+                      )
+                  List(rewritePatch, detectPatch).asPatch
                 case _ =>
                   // TODO: Do we want to warn here about non migrated dynamically generated SQL
                   // or no?
