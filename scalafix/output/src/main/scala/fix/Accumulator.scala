@@ -9,6 +9,8 @@ object BadAcc {
     val litLongAcc = sc.longAccumulator
     val namedAcc = /*sc.accumulator(0, "cheese")*/ null
     val litDoubleAcc = sc.doubleAccumulator
+    val namedLongAcc = sc.longAccumulator("cheese")
+    val namedDoubleAcc = sc.doubleAccumulator("cheese")
     val rdd = sc.parallelize(List(1,2,3))
   }
 }

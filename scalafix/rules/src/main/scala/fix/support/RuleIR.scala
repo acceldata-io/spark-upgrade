@@ -23,8 +23,19 @@ final case class RuleMeta(
 object RuleRegistry {
   private val entries: Seq[RuleMeta] = Seq(
     RuleMeta(
+      // Promoted back to Tier 1 (2026-08-22): the rule now handles the
+      // three ways this hard break actually shows up in real code --
+      // the call site (0L/0.0 constructor forms, named or not), the
+      // Accumulator[Long]/[Double] type annotation, and the now-invalid
+      // `import org.apache.spark.Accumulator` -- and every case it can't
+      // safely resolve (non-zero initial value, Int/other type arg)
+      // neutralizes to compilable placeholder code (comment-out+null /
+      // `Any`) with a finding attached, rather than leaving a broken
+      // reference. That's the same bar UnionRewrite's plain rename meets:
+      // Phase A can apply it unattended without ever leaving the working
+      // copy in a state that fails to compile worse than before.
       ruleId = "AccumulatorUpgrade",
-      tier = 3,
+      tier = 1,
       description = "SparkContext.accumulator is removed in Spark 3.x; migrate to the typed accumulator API (longAccumulator/doubleAccumulator) or a custom AccumulatorV2.",
       docLink = "https://spark.apache.org/docs/latest/core-migration-guide.html#upgrading-from-core-24-to-30",
       defaultConfidence = "high"
@@ -251,6 +262,107 @@ object RuleRegistry {
       description = "Flags count(tbl.*) in SQL text, which Spark 3.0's parser rejects -- only bare count(*) is allowed. Feeds spark.sql.legacy.allowStarWithSingleTableIdentifierInCount.",
       docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
       defaultConfidence = "high"
+    ),
+    // Family D/F/G additions (2026-08-22 design review pass). Tier 3 unless
+    // otherwise noted -- each of these either has no legacy config at all
+    // (Family D/F silent-drift and hard-break items) or would share a config
+    // key with an existing Class B entry that the registry can't split
+    // (DuplicateMapKeyLiteralDetect). Verified against the real 2.4.8
+    // spark-sql/spark-catalyst jars before writing: functions.exists,
+    // functions.array_insert, and Dataset.unionByName(_, Boolean) don't exist
+    // in 2.4.8 at all (added in 3.0/3.4/3.1 respectively), so no 2.4.8
+    // codebase could contain the patterns those design-review items describe
+    // -- deliberately not implemented as detectors for that reason, not
+    // overlooked.
+    RuleMeta(
+      ruleId = "AddMonthsSnapDetect",
+      tier = 3,
+      description = "Flags add_months(...) call sites -- Spark 3.0 no longer reliably snaps the result to the last day of the month for month-end inputs.",
+      docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
+      defaultConfidence = "low"
+    ),
+    RuleMeta(
+      ruleId = "DuplicateMapKeyLiteralDetect",
+      tier = 3,
+      description = "Flags map(...)/create_map(...) calls with a duplicate literal key, which Spark 3.0 throws on by default instead of silently keeping the last value.",
+      docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
+      defaultConfidence = "high"
+    ),
+    RuleMeta(
+      ruleId = "MapTypeKeyInCreateMapDetect",
+      tier = 3,
+      description = "Flags a MapType-valued key (a nested map(...)/create_map(...) expression) in map(...)/map_from_arrays(...), which Spark 3.0 disallows at analysis time.",
+      docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
+      defaultConfidence = "high"
+    ),
+    RuleMeta(
+      ruleId = "SplitEmptyRegexDetect",
+      tier = 3,
+      description = "Flags split(col, \"\") with a literal empty-string regex -- Spark 3.4 changed how trailing empty strings are handled in the result array.",
+      docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
+      defaultConfidence = "medium"
+    ),
+    RuleMeta(
+      ruleId = "SelfJoinAmbiguousColumnDetect",
+      tier = 2,
+      description = "Flags df.join(df, ...) self-joins using the exact same DataFrame reference on both sides, which Spark 3.0 can fail at analysis time as ambiguous. Feeds spark.sql.analyzer.failAmbiguousSelfJoin.",
+      docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
+      defaultConfidence = "high"
+    ),
+    RuleMeta(
+      ruleId = "NaFunctionsNameMatchDetect",
+      tier = 3,
+      description = "Flags na.replace(...)/na.fill(...) call sites -- Spark 3.2 changed DataFrameNaFunctions' column name-matching semantics.",
+      docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
+      defaultConfidence = "low"
+    ),
+    RuleMeta(
+      ruleId = "AnalysisExceptionPlanFieldDetect",
+      tier = 3,
+      description = "Flags AnalysisException.plan field access -- Spark 3.5 reshapes how a failed analysis's plan is exposed on the caught exception.",
+      docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
+      defaultConfidence = "medium"
+    ),
+    // Family B/C/E/H additions (2026-08-22 design review pass, second round).
+    // Verified against the real 2.4.8 jars before writing, same discipline
+    // as the Family D/F/G pass above: SparkSession.cloneSession() (Family B)
+    // is `private[sql]` in 2.4.8's own source -- no external application code
+    // can call it at all, so that design-review item is moot for detecting
+    // customer code, not overlooked. SparkContext-in-executor (Family A) and
+    // the string<->date binary-comparison cast (Family E) were assessed and
+    // deliberately NOT implemented -- both need either closure/lexical-scope
+    // tracing or real type inference to avoid false positives/negatives
+    // Scalafix's AST-level matching can't provide with confidence. Family J
+    // (Hive interop) has no new rule for the same reason RuleRegistry never
+    // had one before this pass: it's platform config, already covered as
+    // report-only Class C entries in LegacyConfigRegistry, not app code.
+    RuleMeta(
+      ruleId = "UserDefinedAggregateFunctionDetect",
+      tier = 3,
+      description = "Flags a class extending UserDefinedAggregateFunction, which is deprecated in Spark 3.0 in favor of Aggregator.",
+      docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
+      defaultConfidence = "high"
+    ),
+    RuleMeta(
+      ruleId = "NegativeDecimalScaleDetect",
+      tier = 2,
+      description = "Flags DecimalType(precision, scale) constructed with a literal negative scale, which Spark 3.0 rejects by default. Feeds spark.sql.legacy.allowNegativeScaleOfDecimal.",
+      docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
+      defaultConfidence = "high"
+    ),
+    RuleMeta(
+      ruleId = "SetCommandSparkConfDetect",
+      tier = 2,
+      description = "Flags a SQL SET key=value command targeting a non-spark.sql.* config key, which Spark 3.0 rejects by default. Feeds spark.sql.legacy.setCommandRejectsSparkCoreConfs.",
+      docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
+      defaultConfidence = "medium"
+    ),
+    RuleMeta(
+      ruleId = "CsvBomMultilineDetect",
+      tier = 3,
+      description = "Flags a CSV read with multiLine=true and no explicit encoding option -- Spark 3.0 removed automatic BOM detection for CSV.",
+      docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
+      defaultConfidence = "medium"
     )
   )
 
