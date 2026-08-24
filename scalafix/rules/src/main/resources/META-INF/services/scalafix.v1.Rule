@@ -43,3 +43,10 @@ fix.UserDefinedAggregateFunctionDetect
 fix.NegativeDecimalScaleDetect
 fix.SetCommandSparkConfDetect
 fix.CsvBomMultilineDetect
+fix.ShuffleWriteMetricsRenameDetect
+fix.IsRunningLocallyWarn
+fix.FromWithoutSelectDetect
+fix.InvalidTimeZoneIdDetect
+fix.CalendarIntervalUsageDetect
+fix.JsonEmptyStringDetect
+fix.CsvBinaryTypeDetect

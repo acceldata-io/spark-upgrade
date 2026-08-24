@@ -35,12 +35,14 @@ class SparkSQLCallExternal extends SemanticRule("SparkSQLCallExternal") {
   // unrestricted, sqlfluff also applies/reports its own generic SQL style
   // rules, which would get misattributed to a Spark migration fix
   // (gap-analysis 2026-08-21 SS3.4).
-  private val ruleCodes = Seq(
+  private val pluginRuleCodes: Set[String] = Set(
     "SPARKSQLCAST_L001", "RESERVEDROPERTIES_L002", "NOCHARS_L003", "FORMATSTRONEINDEX_L004",
     "SPARKSQL_L004", "SPARKSQL_L005", "GLOBALTEMPVIEW_L006", "HISTOGRAMNUMERIC_L007",
     "BYTEPADDING_L008", "BINARYCONV_L009", "CTEPRECEDENCE_L010", "TYPEDPARTITION_L011",
     "TRANSFORMDELIM_L012"
-  ).mkString(",")
+  )
+
+  private val ruleCodes = pluginRuleCodes.toSeq.sorted.mkString(",")
 
   // e.g. "L:   1 | P:   8 | HISTOGRAMNUMERIC_L007 | histogram_numeric(...)..."
   // -- sqlfluff's human-readable lint format. Not `--format json`: the rules
@@ -171,19 +173,59 @@ class SparkSQLCallExternal extends SemanticRule("SparkSQLCallExternal") {
                       )
                     case None => Patch.empty
                   }
-                  val detectPatch =
-                    if (stillFlagged.isEmpty) Patch.empty
+                  // sqlfluff reports its own PRS (parse) violations regardless
+                  // of `--rules`, so they arrive mixed in with the plugin's
+                  // codes. They mean something completely different -- "the
+                  // sparksql dialect could not parse this literal", i.e. the
+                  // Family K rules never got to evaluate it -- and reporting
+                  // that as "flagged for PRS" is worse than saying nothing.
+                  // Split the two and word each honestly. (Confirmed against a
+                  // real run: the `FROM t` form, itself a 3.0 break, is
+                  // unparsable to sqlfluff and surfaced only as PRS.)
+                  val (pluginCodes, parserCodes) = stillFlagged.partition(pluginRuleCodes.contains)
+
+                  val unparseablePatch =
+                    if (parserCodes.isEmpty) Patch.empty
                     else
                       RuleFinding.report(
                         RuleChange(
-                          "SparkSQLCallExternal",
-                          s"sqlfluff flagged this SQL for: ${stillFlagged.toSeq.sorted.mkString(", ")}. " +
+                          "SparkSQLCallExternal.UNPARSEABLE",
+                          "sqlfluff's sparksql dialect could not parse this SQL literal, so NONE of the Family K " +
+                            "SQL rules were evaluated against it -- treat this as 'not checked', not 'clean'. " +
+                            "Common causes: syntax Spark accepts but the dialect doesn't model yet, and syntax " +
+                            "Spark 3.x itself rejects (a leading `FROM`, for instance, which FromWithoutSelectDetect " +
+                            "reports separately).",
+                          "No auto-rewrite; review this SQL by hand.",
+                          endPos
+                        )
+                      )
+
+                  // ONE finding per flagged plugin rule code, and the code is
+                  // carried in the finding id as `SparkSQLCallExternal.<CODE>`.
+                  //
+                  // Previously all 13 of the plugin's rules collapsed into a
+                  // single `SparkSQLCallExternal` finding with the codes listed
+                  // in prose. That made them individually unaddressable
+                  // downstream: several of these SQL behaviour changes have
+                  // their own legacy config (CTEPRECEDENCE_L010 ->
+                  // spark.sql.legacy.ctePrecedencePolicy,
+                  // RESERVEDROPERTIES_L002 -> ...notReserveProperties), and the
+                  // orchestrator maps a config to a RULE ID -- so with one
+                  // shared id it could neither tell which change was found nor
+                  // key a config off it. See the 2026-08-22 review SS6.3.2.
+                  val detectPatch =
+                    pluginCodes.toSeq.sorted.map { code =>
+                      RuleFinding.report(
+                        RuleChange(
+                          s"SparkSQLCallExternal.$code",
+                          s"sqlfluff's sparksql-upgrade plugin flagged this SQL for $code. " +
                             "See spark-upgrade/sql's rule docs (sparksql_upgrade/rules.py) for what changed and why.",
                           "No auto-rewrite; review manually.",
                           endPos
                         )
                       )
-                  List(rewritePatch, detectPatch).asPatch
+                    }.asPatch
+                  List(rewritePatch, detectPatch, unparseablePatch).asPatch
                 case _ =>
                   // TODO: Do we want to warn here about non migrated dynamically generated SQL
                   // or no?

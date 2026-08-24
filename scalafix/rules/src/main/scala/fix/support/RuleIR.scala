@@ -357,6 +357,87 @@ object RuleRegistry {
       docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
       defaultConfidence = "medium"
     ),
+    // 2026-08-24 pass, driven by an item-by-item audit against the upstream
+    // SQL and core migration guides (see the coverage doc). Every candidate was
+    // checked against the real spark-*_2.11-2.4.8 jars with javap FIRST -- that
+    // discipline dropped two rules from this batch before they were written
+    // (`Row.json`/`prettyJson` do not exist in 2.4.8 at all, and 2.4.8's
+    // `date_add(Column, int)` signature cannot express the argument form the
+    // guide says breaks).
+    RuleMeta(
+      ruleId = "ShuffleWriteMetricsRenameDetect",
+      tier = 1,
+      description = "ShuffleWriteMetrics.shuffleBytesWritten/shuffleWriteTime/shuffleRecordsWritten were removed in Spark 3.0; renamed to bytesWritten/writeTime/recordsWritten. A pure rename with no semantic change.",
+      docLink = "https://spark.apache.org/docs/latest/core-migration-guide.html",
+      defaultConfidence = "high"
+    ),
+    RuleMeta(
+      ruleId = "IsRunningLocallyWarn",
+      tier = 3,
+      description = "TaskContext.isRunningLocally() was removed in Spark 3.0 along with local execution, so the code path it guards is dead.",
+      docLink = "https://spark.apache.org/docs/3.0.0/core-migration-guide.html",
+      defaultConfidence = "high"
+    ),
+    RuleMeta(
+      ruleId = "FromWithoutSelectDetect",
+      tier = 3,
+      description = "Flags a SQL string starting with FROM (`FROM t`, `FROM t SELECT c`) -- accepted by accident in Spark 2.4, rejected by 3.0's parser.",
+      docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
+      defaultConfidence = "high"
+    ),
+    RuleMeta(
+      ruleId = "InvalidTimeZoneIdDetect",
+      tier = 3,
+      description = "Flags a literal timezone ID that java.time cannot resolve (validated exactly as Spark does, via ZoneId.SHORT_IDS); Spark 2.4 silently fell back to GMT, 3.0 throws.",
+      docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
+      defaultConfidence = "high"
+    ),
+    RuleMeta(
+      ruleId = "CalendarIntervalUsageDetect",
+      tier = 3,
+      description = "Flags references to CalendarInterval -- from Spark 3.2 date/timestamp subtraction yields DayTimeIntervalType, so code typed against CalendarInterval no longer type-checks.",
+      docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
+      defaultConfidence = "medium"
+    ),
+    RuleMeta(
+      ruleId = "JsonEmptyStringDetect",
+      tier = 2,
+      description = "Flags a JSON read with an explicit schema; from Spark 3.0 an empty string is rejected for non-string fields instead of being read as null. Feeds spark.sql.legacy.json.allowEmptyString.enabled.",
+      docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
+      defaultConfidence = "medium"
+    ),
+    RuleMeta(
+      ruleId = "CsvBinaryTypeDetect",
+      tier = 3,
+      description = "Flags a CSV read whose explicit schema declares BinaryType, which Spark 3.4 no longer supports for CSV. No legacy config exists.",
+      docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
+      defaultConfidence = "high"
+    ),
+    // Two of the sqlfluff plugin's rule codes need their OWN tier, because they
+    // are the detectors for a legacy config and Phase B only injects Tier 2
+    // findings. Every other plugin code inherits SparkSQLCallExternal's Tier 3
+    // metadata through the sub-rule fallback in `apply` below.
+    RuleMeta(
+      ruleId = "SparkSQLCallExternal.CTEPRECEDENCE_L010",
+      tier = 2,
+      description = "sqlfluff plugin: an inner WITH shadows an outer CTE of the same name. Spark 3.0 makes this an error by default instead of silently picking one. Feeds spark.sql.legacy.ctePrecedencePolicy.",
+      docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
+      defaultConfidence = "high"
+    ),
+    RuleMeta(
+      ruleId = "SparkSQLCallExternal.UNPARSEABLE",
+      tier = 3,
+      description = "sqlfluff's sparksql dialect could not parse a literal SQL string, so none of the Family K SQL rules were evaluated against it -- the absence of SQL findings for that literal means 'not checked', not 'clean'.",
+      docLink = "https://docs.sqlfluff.com/en/stable/dialects.html",
+      defaultConfidence = "medium"
+    ),
+    RuleMeta(
+      ruleId = "SparkSQLCallExternal.RESERVEDROPERTIES_L002",
+      tier = 2,
+      description = "sqlfluff plugin: a reserved table/database property (provider/location/owner, plus external from 3.2) set via TBLPROPERTIES/DBPROPERTIES, which Spark 3.0 rejects. Feeds spark.sql.legacy.notReserveProperties.",
+      docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
+      defaultConfidence = "high"
+    ),
     RuleMeta(
       ruleId = "CsvBomMultilineDetect",
       tier = 3,
@@ -370,9 +451,22 @@ object RuleRegistry {
 
   /** Falls back to a Tier 3 "undocumented" entry rather than throwing, since a
    *  rule firing with no registry entry is a rule-authoring bug, not something
-   *  that should crash the whole analysis run. */
+   *  that should crash the whole analysis run.
+   *
+   *  One level of `Rule.Sub` qualification is resolved before that fallback:
+   *  `SparkSQLCallExternal` emits `SparkSQLCallExternal.<PLUGIN_CODE>` so the
+   *  sqlfluff plugin's 13 rules are individually addressable. The handful of
+   *  codes that need their own tier (because they map to a legacy config) get
+   *  their own entry above; the rest should inherit the parent rule's metadata
+   *  rather than silently degrade to "Undocumented rule". */
   def apply(ruleId: String): RuleMeta =
-    all.getOrElse(ruleId, RuleMeta(ruleId, tier = 3, description = "Undocumented rule.", docLink = "", defaultConfidence = "low"))
+    all
+      .get(ruleId)
+      .orElse(ruleId.lastIndexOf('.') match {
+        case -1 => None
+        case i => all.get(ruleId.substring(0, i)).map(_.copy(ruleId = ruleId))
+      })
+      .getOrElse(RuleMeta(ruleId, tier = 3, description = "Undocumented rule.", docLink = "", defaultConfidence = "low"))
 }
 
 /**
