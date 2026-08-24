@@ -8,6 +8,25 @@ import scala.meta._
 import scala.util.Try
 import scala.sys.process._
 
+object SparkSQLCallExternal {
+
+  /** Probed once per JVM, not once per SQL literal.
+   *
+   * The whole Family K rule set (13 rules) lives in the external `sqlfluff`
+   * plugin, so if the binary isn't on PATH this rule contributes ZERO findings
+   * -- and, before this, said nothing about it: `Try(...).toOption` swallowed
+   * the process-launch failure, `stillFlagged` came back empty, and
+   * findings.json/report.html looked exactly like a repo whose SQL was clean.
+   * Silently reporting "no SQL issues" for a repo nobody actually checked is
+   * the worst failure mode an effort-estimation tool has, so the unavailable
+   * case now produces its own finding.
+   *
+   * Probing once also avoids paying two failed process spawns per SQL literal
+   * on every machine that doesn't have the tool. */
+  lazy val available: Boolean =
+    Try(Process(Seq("sqlfluff", "--version")).!(ProcessLogger(_ => (), _ => ())) == 0).getOrElse(false)
+}
+
 class SparkSQLCallExternal extends SemanticRule("SparkSQLCallExternal") {
 
   // The full Family K rule set this fork's sqlfluff plugin (../../../sql,
@@ -41,7 +60,20 @@ class SparkSQLCallExternal extends SemanticRule("SparkSQLCallExternal") {
   private val lintLine = """^L:\s*\d+\s*\|\s*P:\s*\d+\s*\|\s*(\S+)\s*\|.*""".r
 
   override def fix(implicit doc: SemanticDocument): Patch = {
-    val sparkSQLFunMatch = SymbolMatcher.normalized("org.apache.spark.sql.SparkSession.sql")
+    // Both entry points, not just SparkSession: 2.4-era code routinely calls
+    // `sqlContext.sql(...)`, and this jar's own MigrateHiveContext/
+    // MigrateToSparkSessionBuilder rules deliberately REWRITE code into that
+    // shape. Matching only SparkSession.sql meant the Family K pass skipped
+    // exactly the call sites the rest of the jar produces -- the sibling SQL
+    // detectors (SqlInStringDetect, MixedIntervalLiteralDetect, ...) already
+    // name both.
+    val sparkSQLFunMatch = SymbolMatcher.normalized(
+      "org.apache.spark.sql.SparkSession.sql",
+      "org.apache.spark.sql.SQLContext.sql"
+    )
+    // One finding per document is enough to say "Family K didn't run here";
+    // one per SQL literal would bury the real findings.
+    var reportedUnavailable = false
     val utils = new Utils()
 
     // sqlfluff is an optional external tool -- not every environment this
@@ -81,6 +113,20 @@ class SparkSQLCallExternal extends SemanticRule("SparkSQLCallExternal") {
           params match {
             case List(param) =>
               param match {
+                case Lit.String(sql) if !SparkSQLCallExternal.available =>
+                  if (reportedUnavailable) Patch.empty
+                  else {
+                    reportedUnavailable = true
+                    RuleFinding.report(
+                      RuleChange(
+                        "SparkSQLCallExternal",
+                        "sqlfluff is not available on PATH, so the sparksql-upgrade plugin's Family K SQL rules did NOT run against " +
+                          "the literal SQL in this file. Absence of SQL findings here means 'not checked', not 'clean'.",
+                        "Install sqlfluff + the sqlfluff-plugin-sparksql-upgrade package (see spark-upgrade/sql) and re-run analysis.",
+                        Position.Range(param.pos.input, param.pos.end, param.pos.end)
+                      )
+                    )
+                  }
                 case Lit.String(sql) =>
                   val f = File.createTempFile("magic", ".sql")
                   f.deleteOnExit()
@@ -96,8 +142,14 @@ class SparkSQLCallExternal extends SemanticRule("SparkSQLCallExternal") {
                   // closes on, not the line it opens on.
                   val endPos = Position.Range(param.pos.input, param.pos.end, param.pos.end)
 
+                  // The rewrite is emitted as a triple-quoted literal, which
+                  // silently produces unparseable Scala if the SQL itself ends
+                  // in a double quote (`""""` closes early) or contains a
+                  // `"""` sequence. Report those as review-only rather than
+                  // writing source that no longer compiles.
+                  val safeToInline = (s: String) => !s.contains("\"\"\"") && !s.endsWith("\"")
                   val rewritePatch = rewritten match {
-                    case Some(newSQL) =>
+                    case Some(newSQL) if safeToInline(newSQL) =>
                       RuleFinding.report(
                         RuleChange(
                           "SparkSQLCallExternal",
@@ -106,6 +158,16 @@ class SparkSQLCallExternal extends SemanticRule("SparkSQLCallExternal") {
                           endPos
                         ),
                         Patch.replaceTree(param, "\"\"\"" + newSQL + "\"\"\"")
+                      )
+                    case Some(_) =>
+                      RuleFinding.report(
+                        RuleChange(
+                          "SparkSQLCallExternal",
+                          "sqlfluff rewrote this SQL, but the result can't be embedded back as a triple-quoted Scala literal " +
+                            "(it ends in a double quote or contains a \"\"\" sequence).",
+                          "No auto-rewrite; apply sqlfluff's suggested SQL by hand.",
+                          endPos
+                        )
                       )
                     case None => Patch.empty
                   }

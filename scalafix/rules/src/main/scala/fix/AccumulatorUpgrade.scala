@@ -33,6 +33,14 @@ class AccumulatorUpgrade extends SemanticRule("AccumulatorUpgrade") {
         Patch.replaceTree(t, replacement)
       )
 
+    def isSparkPackage(ref: Term.Ref): Boolean = ref.syntax == "org.apache.spark"
+
+    def namesAccumulator(importees: List[Importee]): Boolean = importees.exists {
+      case Importee.Name(Name("Accumulator")) => true
+      case Importee.Rename(Name("Accumulator"), _) => true
+      case _ => false
+    }
+
     def matchOnTree(e: Tree): Patch = {
       e match {
         // non-named accumulator
@@ -168,12 +176,14 @@ class AccumulatorUpgrade extends SemanticRule("AccumulatorUpgrade") {
         // unconditionally: every type-level usage above is rewritten to
         // something else (LongAccumulator/DoubleAccumulator/Any), so nothing
         // in the file still needs this import after this rule runs.
-        case imp @ Import(List(Importer(_, importees))) if importees.exists {
-              case Importee.Name(Name("Accumulator")) => true
-              case Importee.Rename(Name("Accumulator"), _) => true
-              case _ => false
-            } =>
-          importees.collect {
+        // Scoped to `org.apache.spark`, and tolerant of an import statement
+        // with more than one importer. Matching a bare `Accumulator` importee
+        // from ANY package (and only ever the single-importer shape) meant an
+        // unrelated `import mylib.Accumulator` got silently deleted, while
+        // `import org.apache.spark.Accumulator, other.Thing` was missed
+        // entirely.
+        case imp @ Import(importers) if importers.exists(i => isSparkPackage(i.ref) && namesAccumulator(i.importees)) =>
+          importers.filter(i => isSparkPackage(i.ref)).flatMap(_.importees).collect {
             case i @ Importee.Name(Name("Accumulator")) =>
               RuleFinding.report(
                 RuleChange(ruleId, "org.apache.spark.Accumulator is removed in Spark 3.x; this import no longer compiles.", "Removed the Accumulator import.", imp),
