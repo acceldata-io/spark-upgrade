@@ -47,7 +47,10 @@ class MixedIntervalLiteralDetect extends SemanticRule("MixedIntervalLiteralDetec
 
   override def fix(implicit doc: SemanticDocument): Patch = {
     doc.tree.collect {
-      case Term.Apply(sqlMatcher(_), List(lit @ Lit.String(sql))) if intervalClause.findFirstMatchIn(sql).exists(m => isMixed(m.matched)) =>
+      // findAllMatchIn, not findFirstMatchIn -- a query can carry more than
+      // one INTERVAL clause, and only checking the first missed a mixed
+      // clause that wasn't also the first one in the string.
+      case Term.Apply(sqlMatcher(_), List(lit @ Lit.String(sql))) if intervalClause.findAllMatchIn(sql).exists(m => isMixed(m.matched)) =>
         RuleFinding.report(
           RuleChange(
             "MixedIntervalLiteralDetect",

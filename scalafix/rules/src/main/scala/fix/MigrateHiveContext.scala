@@ -28,7 +28,13 @@ class MigrateHiveContext extends SemanticRule("MigrateHiveContext") {
                 utils.addImportIfNotPresent(importer"org.apache.spark.sql.SparkSession")
               ).asPatch
               RuleFinding.report(RuleChange("MigrateHiveContext", explanation, s"Rewrote to $newCreateHive", ns), rewrite)
-            case _ => Patch.empty
+            // A non-Hive `new Foo(...)` used to short-circuit to Patch.empty
+            // here instead of falling through to the generic recursive case
+            // below -- so a nested `new HiveContext(...)` inside another
+            // constructor's arguments (e.g. `new Wrapper(new HiveContext(sc))`)
+            // was never visited at all. Recurse into this node's own children
+            // instead of dropping them.
+            case _ => ns.children.map(matchOnTree).asPatch
           }
         case ns @ Term.Apply(hiveGetOrCreateMatcher(_), _) =>
           val rewrite = List(

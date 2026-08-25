@@ -11,6 +11,12 @@ import scala.meta._
  * empty string in the result array the way 2.4 did. No legacy config exists
  * for this, so it's detect-only -- narrowed to a literal empty-string second
  * argument, the only shape that's statically certain.
+ *
+ * (Audited whether the 3-arg `split(str, pattern, limit)` overload should
+ * also be matched: verified against the real 2.4.8 jar that
+ * `functions.split` has ONLY the 2-arg form there -- the 3-arg overload was
+ * added in 3.0, so a 2.4.8 codebase being migrated can never contain that
+ * shape in the first place. Not a reachable gap; left as exact 2-arg only.)
  */
 class SplitEmptyRegexDetect extends SemanticRule("SplitEmptyRegexDetect") {
   override val description =

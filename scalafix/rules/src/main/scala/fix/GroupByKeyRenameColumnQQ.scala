@@ -45,32 +45,22 @@ class GroupByKeyRenameColumnQQ
       p
     }
 
+    // Previously ANDed a bare `q"""groupByKey"""` name check (matches ANY
+    // identifier named "groupByKey" anywhere in the chain, no symbol
+    // resolution) against a loose "isDataset" check that itself accepted a
+    // bare mention of the `Dataset`/`DataFrame` TYPE NAME anywhere in the
+    // chain (plus a dead, typo'd `DataFame` pattern that could never match).
+    // Together those are satisfied by any unrelated class exposing a
+    // same-named `groupByKey` method somewhere near an unrelated
+    // Dataset/DataFrame type mention -- with isRewrite = true, that silently
+    // rewrites an unrelated "value" literal to "key". `dsGBKmatcher` was
+    // already declared (it's what actually verified real occurrences below)
+    // but was only ever used as one alternative inside the loose OR list
+    // instead of being the deciding check.
     val dsGBKmatcher = SymbolMatcher.normalized("org.apache.spark.sql.Dataset.groupByKey")
-    val dsSelect = SymbolMatcher.normalized("org.apache.spark.sql.Dataset.select")
-    val dsMatcher = SymbolMatcher.normalized("org.apache.spark.sql.Dataset")
-    val dfMatcher = SymbolMatcher.normalized("org.apache.spark.sql.DataFrame")
-    val keyedDs = SymbolMatcher.normalized("org.apache.spark.sql.KeyValueGroupedDataset")
-    val keyedDsCount = SymbolMatcher.normalized("org.apache.spark.sql.KeyValueGroupedDataset.count")
 
-    def isDSGroupByKey(t: Term): Boolean = {
-      val isDataset = t.collect {
-        case q"""DataFame""" => true
-        case q"""Dataset""" => true
-        case q"""Dataset[_]""" => true
-        case dsGBKmatcher(_) => true
-        case dfMatcher(_) => true
-        case dsMatcher(_) => true
-        case dsSelect(_) => true
-        case keyedDs(_) => true
-        case keyedDsCount(_) => true
-      }
-      val isGroupByKey = t.collect { case q"""groupByKey""" => true }
-      (isGroupByKey.isEmpty.equals(false) && isGroupByKey.head.equals(
-        true
-      )) && (isDataset.isEmpty.equals(false) && isDataset.head.equals(
-        true
-      ))
-    }
+    def isDSGroupByKey(t: Term): Boolean =
+      t.collect { case dsGBKmatcher(_) => true }.nonEmpty
 
     def matchOnTree(t: Tree): Patch = {
       t match {

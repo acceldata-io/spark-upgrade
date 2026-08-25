@@ -23,11 +23,21 @@ class PathOptionConflictDetect extends SemanticRule("PathOptionConflictDetect") 
   override val description =
     "Flags a `path` option coexisting with a path argument to load()/save(), which Spark 3.1 rejects instead of silently picking one."
 
+  // `Map("path" -> v, ...)` desugars to `Term.ApplyInfix`; a plain tuple
+  // literal `Map(("path", v), ...)` is a `Term.Tuple` -- either is a real
+  // "path" KEY, unlike a bare `Lit.String("path")` anywhere in the map's
+  // arguments (which also matches "path" used as some OTHER key's VALUE).
+  private def isPathKeyPair(t: Tree): Boolean = t match {
+    case Term.ApplyInfix(Lit.String("path"), Term.Name("->" | "→"), _, _) => true
+    case Term.Tuple(List(Lit.String("path"), _)) => true
+    case _ => false
+  }
+
   private def hasPathOption(recv: Tree): Boolean =
     recv.collect {
       case Term.Apply(Term.Select(_, Term.Name("option")), List(Lit.String("path"), _)) => true
-      case Term.Apply(Term.Select(_, Term.Name("options")), args) =>
-        args.exists(_.collect { case Lit.String("path") => true }.nonEmpty)
+      case Term.Apply(Term.Select(_, Term.Name("options")), List(Term.Apply(_, pairs))) =>
+        pairs.exists(isPathKeyPair)
     }.contains(true)
 
   override def fix(implicit doc: SemanticDocument): Patch = {

@@ -20,13 +20,23 @@ import scala.meta._
  * schema expression are non-string.
  *
  * Feeds `spark.sql.legacy.json.allowEmptyString.enabled`.
+ *
+ * `hasExplicitSchema` walks only the fluent chain's own receiver spine, not
+ * `recv.collect` over the whole receiver subtree -- the latter would also
+ * match a `.schema(...)`-named call nested inside some unrelated ARGUMENT
+ * within the same chain (e.g. `.option("tag", cfg.schema(x).toString)`),
+ * which has nothing to do with the reader's own schema.
  */
 class JsonEmptyStringDetect extends SemanticRule("JsonEmptyStringDetect") {
   override val description =
     "Flags a JSON read with an explicit schema; from Spark 3.0 an empty string is rejected for non-string fields instead of read as null."
 
-  private def hasExplicitSchema(recv: Tree): Boolean =
-    recv.collect { case Term.Apply(Term.Select(_, Term.Name("schema")), _) => true }.contains(true)
+  private def hasExplicitSchema(recv: Tree): Boolean = recv match {
+    case Term.Apply(Term.Select(_, Term.Name("schema")), _) => true
+    case Term.Apply(inner, _) => hasExplicitSchema(inner)
+    case Term.Select(inner, _) => hasExplicitSchema(inner)
+    case _ => false
+  }
 
   override def fix(implicit doc: SemanticDocument): Patch = {
     doc.tree.collect {

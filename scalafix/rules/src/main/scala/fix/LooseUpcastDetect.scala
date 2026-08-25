@@ -22,6 +22,15 @@ import scala.meta._
  * Feeds `spark.sql.legacy.doLooseUpcast`, but the registry's own
  * remediation note treats a hit here as "usually a genuine type mismatch
  * worth fixing in code" rather than something to paper over with the config.
+ *
+ * Previously matched `.as[T]` purely syntactically (any receiver), with no
+ * semantic tie to `Dataset`/`Column` at all -- despite `SemanticDocument`
+ * being available. `.as[T]` on an atomic type is also the idiomatic pattern
+ * for Play JSON (`(json \ "count").as[Int]`) and similar libraries, entirely
+ * unrelated to Spark's upcast validation change; any codebase mixing Spark
+ * with one of those would have this firing constantly on ordinary field
+ * extraction. Fixed to additionally require the resolved symbol to be
+ * `Dataset.as`.
  */
 class LooseUpcastDetect extends SemanticRule("LooseUpcastDetect") {
   override val description =
@@ -30,15 +39,11 @@ class LooseUpcastDetect extends SemanticRule("LooseUpcastDetect") {
   private val atomicTypes: Set[String] =
     Set("Boolean", "Byte", "Short", "Int", "Long", "Float", "Double", "String")
 
-  // Matched syntactically (Dataset.as[U] takes a type arg and zero value
-  // args -- Column's `.as(alias: String)` and Any's `.asInstanceOf[T]` are
-  // both a different shape), not via the receiver's resolved type: Dataset's
-  // own type parameter is erased/hard to recover reliably at every call
-  // shape this rule would need to handle, and the target-type restriction to
-  // Scala's own atomic types already keeps false positives low without it.
+  private val matcher = SymbolMatcher.normalized("org.apache.spark.sql.Dataset.as")
+
   override def fix(implicit doc: SemanticDocument): Patch = {
     doc.tree.collect {
-      case t @ Term.ApplyType(Term.Select(_, Term.Name("as")), List(targetType))
+      case t @ Term.ApplyType(Term.Select(_, matcher(_)), List(targetType))
           if atomicTypes.contains(targetType.toString) =>
         RuleFinding.report(
           RuleChange(

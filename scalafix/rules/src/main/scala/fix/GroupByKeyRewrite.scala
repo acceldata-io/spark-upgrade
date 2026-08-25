@@ -3,8 +3,32 @@ import fix.support.{RuleChange, RuleFinding}
 import scalafix.v1._
 import scala.meta._
 
+/**
+ * Family F (SQL migration guide, 2.4 -> 3.0): Tier 1 auto-rewrite counterpart
+ * to `GroupByKeyWarn` for the specific, syntactically-recognizable shapes
+ * where the renamed grouping column ("value" -> "key") is referenced by a
+ * string/symbol literal right after `.groupByKey(...).count()`.
+ *
+ * Every one of the five branches below decided eligibility PURELY by
+ * identifier-name text (`"groupByKey".equals(grpByKeyName) && "toDS".equals(fName)
+ * && "count".equals(oprName) && ...`), with no semantic/symbol check at all --
+ * despite `SemanticDocument` being available. Because this rule REWRITES
+ * source (unlike a detect-only rule), a false positive here doesn't just
+ * over-report, it silently corrupts code: any unrelated class defining
+ * methods literally named `toDS`/`groupByKey`/`count`/`withColumnRenamed`
+ * chained in one of these shapes -- nothing to do with Spark -- would have
+ * its `"value"` string literal silently rewritten to `"key"`. Verified
+ * against the real 2.4.8 jar that both symbols exist as expected
+ * (`Dataset#groupByKey`, `KeyValueGroupedDataset#count`). Each branch below
+ * now additionally requires the `groupByKey` and `count` call names to
+ * resolve to those exact Spark symbols before rewriting, closing that gap
+ * while keeping the existing, already-tested structural shape matching.
+ */
 class GroupByKeyRewrite extends SemanticRule("GroupByKeyRewrite") {
   override val isRewrite = true
+
+  private val groupByKeyMatcher = SymbolMatcher.normalized("org.apache.spark.sql.Dataset.groupByKey")
+  private val countMatcher = SymbolMatcher.normalized("org.apache.spark.sql.KeyValueGroupedDataset.count")
 
   override def fix(implicit doc: SemanticDocument): Patch = {
     val grpByKey = "groupByKey"
@@ -37,11 +61,11 @@ class GroupByKeyRewrite extends SemanticRule("GroupByKeyRewrite") {
                           ),
                           _
                         ),
-                        _ @Term.Name(grpByKeyName)
+                        gbk @ Term.Name(grpByKeyName)
                       ),
                       _
                     ),
-                    _ @Term.Name(oprName)
+                    cnt @ Term.Name(oprName)
                   ),
                   _
                 ),
@@ -52,7 +76,7 @@ class GroupByKeyRewrite extends SemanticRule("GroupByKeyRewrite") {
             if grpByKey
               .equals(grpByKeyName) && funcToDS.equals(fName) && agrFunCount
               .equals(oprName) && oprCol.equals(oprColumnName) && colNameOld
-              .equals(valueOld) =>
+              .equals(valueOld) && groupByKeyMatcher.matches(gbk) && countMatcher.matches(cnt) =>
           renamed(oldColName, "\"".concat(colNameNew).concat("\""))
         case Term.Apply(
               Term.Select(
@@ -67,11 +91,11 @@ class GroupByKeyRewrite extends SemanticRule("GroupByKeyRewrite") {
                           ),
                           _
                         ),
-                        _ @Term.Name(grpByKeyName)
+                        gbk @ Term.Name(grpByKeyName)
                       ),
                       _
                     ),
-                    _ @Term.Name(countName)
+                    cnt @ Term.Name(countName)
                   ),
                   _
                 ),
@@ -89,7 +113,7 @@ class GroupByKeyRewrite extends SemanticRule("GroupByKeyRewrite") {
             if grpByKey
               .equals(grpByKeyName) && funcToDS.equals(toDSName) && agrFunCount
               .equals(countName) && "select".equals(selectName) && "$"
-              .equals(cName) && "value".equals(colOldName) =>
+              .equals(cName) && "value".equals(colOldName) && groupByKeyMatcher.matches(gbk) && countMatcher.matches(cnt) =>
           renamed(colOld, colNameNew)
         case Term.Apply(
               Term.Select(
@@ -104,11 +128,11 @@ class GroupByKeyRewrite extends SemanticRule("GroupByKeyRewrite") {
                           ),
                           _
                         ),
-                        _ @Term.Name(groupByKeyName)
+                        gbk @ Term.Name(groupByKeyName)
                       ),
                       _
                     ),
-                    _ @Term.Name(countName)
+                    cnt @ Term.Name(countName)
                   ),
                   _
                 ),
@@ -127,7 +151,7 @@ class GroupByKeyRewrite extends SemanticRule("GroupByKeyRewrite") {
             ) && "count".equals(
               countName
             ) && "select".equals(selectName) && "col"
-              .equals(colName) && colNameOld.equals(valueName) =>
+              .equals(colName) && colNameOld.equals(valueName) && groupByKeyMatcher.matches(gbk) && countMatcher.matches(cnt) =>
           renamed(oldNameColumn, "\"".concat(colNameNew).concat("\""))
         case Term.Apply(
               Term.Select(
@@ -142,11 +166,11 @@ class GroupByKeyRewrite extends SemanticRule("GroupByKeyRewrite") {
                           ),
                           _
                         ),
-                        _ @Term.Name(groupByKeyName)
+                        gbk @ Term.Name(groupByKeyName)
                       ),
                       _
                     ),
-                    _ @Term.Name(countName)
+                    cnt @ Term.Name(countName)
                   ),
                   _
                 ),
@@ -162,7 +186,7 @@ class GroupByKeyRewrite extends SemanticRule("GroupByKeyRewrite") {
             ) && "count".equals(
               countName
             ) && "select"
-              .equals(selectName) && "'value".equals(valueName.toString()) =>
+              .equals(selectName) && "'value".equals(valueName.toString()) && groupByKeyMatcher.matches(gbk) && countMatcher.matches(cnt) =>
           renamed(oldNameColumn, "'".concat(colNameNew))
 
         case Term.Apply(
@@ -178,11 +202,11 @@ class GroupByKeyRewrite extends SemanticRule("GroupByKeyRewrite") {
                           ),
                           _
                         ),
-                        _ @Term.Name(groupByKeyName)
+                        gbk @ Term.Name(groupByKeyName)
                       ),
                       _
                     ),
-                    _ @Term.Name(countName)
+                    cnt @ Term.Name(countName)
                   ),
                   _
                 ),
@@ -207,7 +231,7 @@ class GroupByKeyRewrite extends SemanticRule("GroupByKeyRewrite") {
               countName
             ) && "withColumn".equals(withColumnName) && "col".equals(
               colName
-            ) && "value".equals(valueName) =>
+            ) && "value".equals(valueName) && groupByKeyMatcher.matches(gbk) && countMatcher.matches(cnt) =>
           renamed(oldNameColumn, "\"".concat(colNameNew).concat("\""))
       }.asPatch
     }
