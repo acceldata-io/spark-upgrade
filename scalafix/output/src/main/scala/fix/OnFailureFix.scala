@@ -6,8 +6,8 @@ import scala.util.{ Failure, Success }
 
 object OnFailureFix {
   def inSource(f: Future[Int], g: Future[Int]): Unit = {
-    f.onComplete { case Failure(e: RuntimeException) => println(e.getMessage) }
+    f.onComplete { case Failure(e: RuntimeException) => println(e.getMessage) case _ => () }
 
-    g.onComplete { case Success(v) => println(v) }
+    g.onComplete { case Success(v) => println(v) case _ => () }
   }
 }

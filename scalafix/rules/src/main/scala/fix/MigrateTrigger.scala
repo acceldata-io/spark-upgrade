@@ -22,6 +22,32 @@ import scala.meta._
  * (`import org.apache.spark.sql.streaming.{ProcessingTime => PT}`, still
  * resolving to the exact same removed symbol) is silently missed. Both
  * removed -- the underlying `SymbolMatcher` was already precise.
+ *
+ * A second, more serious bug was caught during a later tier-promotion
+ * review: adding `import org.apache.spark.sql.streaming.Trigger._` while
+ * leaving the bare `ProcessingTime(...)` call site untouched does NOT work
+ * when the file also has (as is typical) `import
+ * org.apache.spark.sql.streaming._` in scope -- verified with a real 2.11
+ * compile against the 2.4.8 jars that this produces a hard "reference to
+ * ProcessingTime is ambiguous" error, since two wildcard imports providing
+ * the same simple name is an ambiguity in Scala, not resolved by import
+ * order. That's a real regression against PROJECT-GUIDE's "a Tier 1 rewrite
+ * must compile under 2.4.8 too" rule -- it would have broken Phase A's own
+ * sequential compilation the moment this rule ran on such a file. Fixed to
+ * replace the call site itself with the fully-qualified
+ * `org.apache.spark.sql.streaming.Trigger.ProcessingTime`, which resolves
+ * unambiguously regardless of what else is wildcard-imported (also verified
+ * by a real 2.11/2.4.8 compile) -- no import needs adding at all.
+ *
+ * A third bug surfaced while fixing the second: the custom `matchOnTree`
+ * walker's `case triggerMatcher(t) => ...` matched at whatever tree level it
+ * was first encountered top-down -- since a `SymbolMatcher` also matches the
+ * enclosing `Term.Apply` (the standard multi-match trap, PROJECT-GUIDE A.9
+ * #2), it matched the WHOLE `ProcessingTime(1.second)` call, not just the
+ * bare name, so `Patch.replaceTree` on it silently dropped the `(1.second)`
+ * argument. Narrowed to `Term.Name` specifically (as `IsRunningLocallyWarn`/
+ * `ShuffleWriteMetricsRenameDetect` already do) so only the identifier is
+ * replaced and the call's own arguments survive untouched.
  */
 class MigrateTrigger extends SemanticRule("MigrateTrigger") {
   override val description =
@@ -29,20 +55,20 @@ class MigrateTrigger extends SemanticRule("MigrateTrigger") {
   override val isRewrite = true
 
   private val triggerMatcher = SymbolMatcher.normalized("org.apache.spark.sql.streaming.ProcessingTime")
+  private val qualifiedReplacement = "org.apache.spark.sql.streaming.Trigger.ProcessingTime"
 
   override def fix(implicit doc: SemanticDocument): Patch = {
-    val utils = new Utils()
     def matchOnTree(e: Tree): Patch = {
       e match {
-        case triggerMatcher(t) =>
+        case t: Term.Name if triggerMatcher.matches(t) =>
           RuleFinding.report(
             RuleChange(
               "MigrateTrigger",
               "org.apache.spark.sql.streaming.ProcessingTime was removed in favor of Trigger.ProcessingTime.",
-              "Added the org.apache.spark.sql.streaming.Trigger._ import.",
+              s"Rewrote to $qualifiedReplacement",
               t
             ),
-            utils.addImportIfNotPresent(importer"org.apache.spark.sql.streaming.Trigger._")
+            Patch.replaceTree(t, qualifiedReplacement)
           )
         case elem @ _ =>
           elem.children match {

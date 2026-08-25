@@ -23,19 +23,38 @@ import scala.meta._
  * `case Failure(<pattern>) [if <guard>] => <body>` (or `Success(...)` for
  * onSuccess), preserving the real handler logic, and replacing the whole
  * call in one patch instead of two overlapping ones.
+ *
+ * A second, more subtle bug was caught during a later tier-promotion review
+ * (verified via `javap`): `Future#onFailure`/`#onSuccess` take a
+ * `PartialFunction`, so an outcome the case clauses don't cover is simply
+ * never invoked (`PartialFunction#isDefinedAt` gates it) -- but
+ * `Future#onComplete` takes a plain, TOTAL `Function1[Try[T], U]`. A
+ * `{ case Failure(e) => ... }` literal with no other case, used where a
+ * total function is expected, still compiles (as "match may not be
+ * exhaustive" warns), but THROWS `scala.MatchError` at runtime the moment
+ * the wrapped future actually succeeds -- which the original `onFailure`
+ * callback would have simply never fired for. `rewriteCases` now appends a
+ * trailing `case _ => ()` so the rewritten callback stays total, matching
+ * the original PartialFunction's silent-skip behavior on a non-matching
+ * outcome instead of crashing.
  */
 class OnFailureFix extends SemanticRule("onFailureFix") {
   // See https://stackoverflow.com/questions/62047662/value-onsuccess-is-not-a-member-of-scala-concurrent-futureany
   val onFailureFunMatch = SymbolMatcher.normalized("scala.concurrent.Future.onFailure")
   val onSuccessFunMatch = SymbolMatcher.normalized("scala.concurrent.Future.onSuccess")
 
-  private def rewriteCases(cases: List[Case], wrapper: String): String =
-    cases
-      .map {
-        case Case(pat, None, body) => s"case $wrapper($pat) => $body"
-        case Case(pat, Some(cond), body) => s"case $wrapper($pat) if $cond => $body"
-      }
-      .mkString(" ")
+  private def rewriteCases(cases: List[Case], wrapper: String): String = {
+    val transplanted = cases.map {
+      case Case(pat, None, body) => s"case $wrapper($pat) => $body"
+      case Case(pat, Some(cond), body) => s"case $wrapper($pat) if $cond => $body"
+    }
+    // `onComplete` expects a total function, unlike the PartialFunction
+    // `onFailure`/`onSuccess` took -- without this, an outcome none of the
+    // transplanted cases cover (e.g. the future actually succeeding, for an
+    // onFailure rewrite) throws MatchError at runtime instead of the
+    // original's silent no-op.
+    (transplanted :+ "case _ => ()").mkString(" ")
+  }
 
   override def fix(implicit doc: SemanticDocument): Patch = {
     val utils = new Utils()

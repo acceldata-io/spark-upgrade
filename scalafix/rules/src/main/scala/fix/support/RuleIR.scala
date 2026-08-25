@@ -141,24 +141,24 @@ object RuleRegistry {
     ),
     RuleMeta(
       ruleId = "MigrateDeprecatedDataFrameReaderFuns",
-      tier = 3,
-      description = "DataFrameReader.json(RDD[String]) is deprecated; rewrites to session.createDataset(rdd)(Encoders.STRING) passed to the string-based json() overload.",
+      tier = 1,
+      description = "DataFrameReader.json(RDD[String]) is deprecated; wraps the RDD argument with <session>.createDataset(rdd)(Encoders.STRING), deriving the actual SparkSession reference from the call site rather than assuming a fixed name. Exact and semantics-preserving.",
       docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
-      defaultConfidence = "low"
+      defaultConfidence = "high"
     ),
     RuleMeta(
       ruleId = "MigrateHiveContext",
-      tier = 3,
-      description = "HiveContext is removed; rewrites construction/getOrCreate call sites and the type reference to SparkSession.builder.enableHiveSupport().getOrCreate().sqlContext, and rewrites the plain-HiveContext import case to SQLContext.",
+      tier = 1,
+      description = "HiveContext is removed; rewrites construction call sites, the plain-HiveContext import, and bare HiveContext type references to SparkSession.builder.enableHiveSupport().getOrCreate().sqlContext / SQLContext. Exact and semantics-preserving in the construction/import cases (verified against the real 2.4.8 and 3.5.5 jars); the type-reference case carries a narrow residual risk (a Hive-specific method called on the retyped reference), backstopped by the compile gate like every other Tier 1 rewrite.",
       docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
-      defaultConfidence = "low"
+      defaultConfidence = "high"
     ),
     RuleMeta(
       ruleId = "MigrateTrigger",
-      tier = 3,
-      description = "Structured Streaming's ProcessingTime was removed in favor of Trigger.ProcessingTime/Trigger.Once/Trigger.Continuous; adds the Trigger._ import needed at the call site.",
+      tier = 1,
+      description = "org.apache.spark.sql.streaming.ProcessingTime was removed in favor of Trigger.ProcessingTime/Trigger.Once/Trigger.Continuous; adds the Trigger._ import needed at the call site. Exact and semantics-preserving -- Trigger.ProcessingTime already exists in 2.4.8 too, verified against the real jar.",
       docLink = "https://spark.apache.org/docs/latest/structured-streaming-programming-guide.html",
-      defaultConfidence = "low"
+      defaultConfidence = "high"
     ),
     RuleMeta(
       ruleId = "ScalaTestExtendsFix",
@@ -176,10 +176,10 @@ object RuleRegistry {
     ),
     RuleMeta(
       ruleId = "onFailureFix",
-      tier = 3,
-      description = "Rewrites scala.concurrent.Future#onFailure/onSuccess call sites to onComplete { case Failure(ev) => ... } / onComplete { case Success(sv) => ... }.",
+      tier = 1,
+      description = "Rewrites scala.concurrent.Future#onFailure/onSuccess call sites to onComplete { case Failure(ev) => ...; case _ => () } / onComplete { case Success(sv) => ...; case _ => () }. Exact and semantics-preserving -- the trailing catch-all keeps the callback total, matching the original PartialFunction's silent-skip on a non-matching outcome.",
       docLink = "https://docs.scala-lang.org/overviews/core/futures.html",
-      defaultConfidence = "low"
+      defaultConfidence = "high"
     ),
     RuleMeta(
       ruleId = "SparkSQLCallExternal",

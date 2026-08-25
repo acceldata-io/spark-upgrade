@@ -15,4 +15,10 @@ object BadReadsAddImports {
     val shouldRewriteExplicit = session.read.json(r3) // assert: MigrateDeprecatedDataFrameReaderFuns
     val noRewrite2 = session.read.json(dataset)
   }
+
+  // The overwhelmingly common naming convention -- must resolve to "spark",
+  // not a hardcoded "session" that doesn't exist in this scope.
+  def doMoreWork(spark: SparkSession, r: RDD[String]) = {
+    val shouldRewriteSpark = spark.read.json(r) // assert: MigrateDeprecatedDataFrameReaderFuns
+  }
 }
