@@ -444,6 +444,21 @@ object RuleRegistry {
       description = "Flags a CSV read with multiLine=true and no explicit encoding option -- Spark 3.0 removed automatic BOM detection for CSV.",
       docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
       defaultConfidence = "medium"
+    ),
+    // Not a Spark API change -- a Scala 2.11 -> 2.12 SOURCE break (code
+    // review 2026-08-22 §8.2). The tool bumps scalaVersion to 2.12 (Tier 1)
+    // but had nothing for the source-level fallout of that bump until this
+    // rule; a purely syntactic, exact rewrite (insert ": Unit =" before an
+    // existing body, nothing else touched), so it earns Tier 1 the same way
+    // MigrateHiveContext/MigrateTrigger/onFailureFix did in the 2026-08-25
+    // tier audit -- and being compile-breaking, any mistake here is caught
+    // immediately by the compile gate.
+    RuleMeta(
+      ruleId = "ProcedureSyntaxDetect",
+      tier = 1,
+      description = "Procedure syntax (def f() { ... }, no `=`) is deprecated in Scala 2.12 and removed in 2.13; rewrites to def f(): Unit = { ... }.",
+      docLink = "https://docs.scala-lang.org/scala3/guides/migration/incompat-syntactic.html#procedure-syntax",
+      defaultConfidence = "high"
     )
   )
 

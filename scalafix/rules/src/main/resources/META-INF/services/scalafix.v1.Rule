@@ -50,3 +50,4 @@ fix.InvalidTimeZoneIdDetect
 fix.CalendarIntervalUsageDetect
 fix.JsonEmptyStringDetect
 fix.CsvBinaryTypeDetect
+fix.ProcedureSyntaxDetect
