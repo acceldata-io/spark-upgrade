@@ -78,7 +78,7 @@ object RuleRegistry {
     RuleMeta(
       ruleId = "SqlInStringDetect",
       tier = 3,
-      description = "Flags spark.sql(...)/sqlContext.sql(...) call sites so in-line SQL can be reviewed separately for Spark 3.x SQL-dialect changes; classifies the query as literal, string-interpolated, or dynamically built.",
+      description = "Flags spark.sql(...)/sqlContext.sql(...) call sites whose SQL is string-interpolated or dynamically built -- the shapes no other SQL rule in this jar can inspect, since they all require a literal argument. A literal argument is not flagged here; it's covered directly by SparkSQLCallExternal and the Scala-regex Family K rules.",
       docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
       defaultConfidence = "low"
     ),
@@ -183,10 +183,10 @@ object RuleRegistry {
     ),
     RuleMeta(
       ruleId = "SparkSQLCallExternal",
-      tier = 3,
-      description = "Runs the sqlfluff sparksql-upgrade plugin's Family K rule set (13 rules -- CAST, reserved properties, CHAR, format_string, EXTRACT SECOND, percentile_approx, GLOBAL TEMP VIEW, histogram_numeric, lpad/rpad, to_binary/unbase64, CTE precedence, PARTITION literals, TRANSFORM) against a literal SQL string passed to spark.sql(...)/sqlContext.sql(...): auto-rewrites what's fix-compatible, reports the rest as findings. Requires sqlfluff + the plugin on PATH; falls back to no findings if unavailable or if the process fails.",
+      tier = 1,
+      description = "Runs the sqlfluff sparksql-upgrade plugin's Family K rule set (13 rules -- CAST, reserved properties, CHAR, format_string, EXTRACT SECOND, percentile_approx, GLOBAL TEMP VIEW, histogram_numeric, lpad/rpad, to_binary/unbase64, CTE precedence, PARTITION literals, TRANSFORM) against a literal SQL string passed to spark.sql(...)/sqlContext.sql(...): auto-rewrites the 6 fix-compatible codes (lint runs against the original SQL first, so the specific code is captured before any rewrite), reports the other 7 detect-only codes as findings. Requires sqlfluff + the plugin on PATH; falls back to no findings if unavailable or if the process fails.",
       docLink = "https://docs.sqlfluff.com/en/stable/dialects.html",
-      defaultConfidence = "low"
+      defaultConfidence = "high"
     ),
     // Tier 2 / Class A config-injection detectors (2026-08-17 review Part 4;
     // gap-analysis 2026-08-21 SS2.2): each one names a
@@ -413,10 +413,87 @@ object RuleRegistry {
       docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
       defaultConfidence = "high"
     ),
-    // Two of the sqlfluff plugin's rule codes need their OWN tier, because they
-    // are the detectors for a legacy config and Phase B only injects Tier 2
-    // findings. Every other plugin code inherits SparkSQLCallExternal's Tier 3
-    // metadata through the sub-rule fallback in `apply` below.
+    // The sqlfluff plugin's 13 Family K codes, split by whether `rules.py`
+    // implements a `LintFix` for them (2026-08-26 tier promotion). The 6
+    // fixable codes are now real, correctly-attributed Tier 1 rewrites --
+    // lint runs against the original SQL before `fix` touches it, so each
+    // code is captured from the actual violation, not lost/misattributed
+    // the way the old fix-then-lint order did. The 7 detect-only codes get
+    // their own Tier 3 entry so they DON'T inherit the parent's new Tier 1
+    // through the sub-rule fallback in `apply` below -- they have no fix,
+    // so auto-applying them would be wrong. CTEPRECEDENCE_L010 keeps its
+    // Tier 2: no fix exists for it, and it's the one code Phase B's
+    // config-injection actually keys on (spark.sql.legacy.ctePrecedencePolicy).
+    RuleMeta(
+      ruleId = "SparkSQLCallExternal.SPARKSQLCAST_L001",
+      tier = 1,
+      description = "sqlfluff plugin: cast(x as int) on a string that may not parse cleanly is rewritten to int(x). Exact, sqlfluff-verified rewrite.",
+      docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
+      defaultConfidence = "high"
+    ),
+    RuleMeta(
+      ruleId = "SparkSQLCallExternal.RESERVEDROPERTIES_L002",
+      tier = 1,
+      description = "sqlfluff plugin: a reserved table/database property (provider/location/owner, plus external from 3.2) set via TBLPROPERTIES/DBPROPERTIES is rewritten to the Spark 3.0-safe form. spark.sql.legacy.notReserveProperties remains a fallback for any site the rewrite can't safely reinline.",
+      docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
+      defaultConfidence = "high"
+    ),
+    RuleMeta(
+      ruleId = "SparkSQLCallExternal.NOCHARS_L003",
+      tier = 1,
+      description = "sqlfluff plugin: CHAR is no longer supported outside Hive tables from Spark 3.0 (2.4 silently treated it as STRING); rewritten to STRING.",
+      docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
+      defaultConfidence = "high"
+    ),
+    RuleMeta(
+      ruleId = "SparkSQLCallExternal.FORMATSTRONEINDEX_L004",
+      tier = 1,
+      description = "sqlfluff plugin: format_string's %0$ zero-indexed form (silently treated as %1$ under 2.4/JDK8) is rewritten to the explicit 1-based index.",
+      docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
+      defaultConfidence = "high"
+    ),
+    RuleMeta(
+      ruleId = "SparkSQLCallExternal.SPARKSQL_L004",
+      tier = 1,
+      description = "sqlfluff plugin: extract(second from ts) changed return type from IntegerType (2.4) to DecimalType(8,6) (3.0+); rewritten to preserve the original integer behavior.",
+      docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
+      defaultConfidence = "high"
+    ),
+    RuleMeta(
+      ruleId = "SparkSQLCallExternal.SPARKSQL_L005",
+      tier = 1,
+      description = "sqlfluff plugin: approx_percentile's accuracy argument must be an exact integral type from Spark 3.0 (2.4 silently coerced a fractional one); rewritten to cast(... as int).",
+      docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
+      defaultConfidence = "high"
+    ),
+    RuleMeta(
+      ruleId = "SparkSQLCallExternal.GLOBALTEMPVIEW_L006",
+      tier = 3,
+      description = "sqlfluff plugin: global temp views aren't portable across all Spark runtimes (Spark Connect / serverless). Detect-only, no safe rewrite.",
+      docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
+      defaultConfidence = "low"
+    ),
+    RuleMeta(
+      ruleId = "SparkSQLCallExternal.HISTOGRAMNUMERIC_L007",
+      tier = 3,
+      description = "sqlfluff plugin: histogram_numeric's (x, y) struct field x matches the input's numeric type from Spark 3.3, was always DoubleType before. Detect-only.",
+      docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
+      defaultConfidence = "low"
+    ),
+    RuleMeta(
+      ruleId = "SparkSQLCallExternal.BYTEPADDING_L008",
+      tier = 3,
+      description = "sqlfluff plugin: lpad/rpad gained a BINARY overload in Spark 3.3 with byte-sequence, not character, padding semantics. Detect-only.",
+      docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
+      defaultConfidence = "low"
+    ),
+    RuleMeta(
+      ruleId = "SparkSQLCallExternal.BINARYCONV_L009",
+      tier = 3,
+      description = "sqlfluff plugin: to_binary now throws on malformed input (Spark 3.3) instead of returning NULL. Detect-only.",
+      docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
+      defaultConfidence = "low"
+    ),
     RuleMeta(
       ruleId = "SparkSQLCallExternal.CTEPRECEDENCE_L010",
       tier = 2,
@@ -425,18 +502,25 @@ object RuleRegistry {
       defaultConfidence = "high"
     ),
     RuleMeta(
+      ruleId = "SparkSQLCallExternal.TYPEDPARTITION_L011",
+      tier = 3,
+      description = "sqlfluff plugin: untyped partition literals are handled more strictly from Spark 3.0. Detect-only.",
+      docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
+      defaultConfidence = "low"
+    ),
+    RuleMeta(
+      ruleId = "SparkSQLCallExternal.TRANSFORMDELIM_L012",
+      tier = 3,
+      description = "sqlfluff plugin: TRANSFORM's default delimiters and no-AS schema inference changed in Spark 3.0. Detect-only.",
+      docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
+      defaultConfidence = "low"
+    ),
+    RuleMeta(
       ruleId = "SparkSQLCallExternal.UNPARSEABLE",
       tier = 3,
       description = "sqlfluff's sparksql dialect could not parse a literal SQL string, so none of the Family K SQL rules were evaluated against it -- the absence of SQL findings for that literal means 'not checked', not 'clean'.",
       docLink = "https://docs.sqlfluff.com/en/stable/dialects.html",
       defaultConfidence = "medium"
-    ),
-    RuleMeta(
-      ruleId = "SparkSQLCallExternal.RESERVEDROPERTIES_L002",
-      tier = 2,
-      description = "sqlfluff plugin: a reserved table/database property (provider/location/owner, plus external from 3.2) set via TBLPROPERTIES/DBPROPERTIES, which Spark 3.0 rejects. Feeds spark.sql.legacy.notReserveProperties.",
-      docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
-      defaultConfidence = "high"
     ),
     RuleMeta(
       ruleId = "CsvBomMultilineDetect",

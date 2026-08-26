@@ -92,21 +92,27 @@ class SparkSQLCallExternal extends SemanticRule("SparkSQLCallExternal") {
     def sqlfluffOutput(args: Seq[String], sqlFile: File): Option[String] =
       Try(Process(Seq("sqlfluff") ++ args ++ Seq("--dialect", "sparksql", "--rules", ruleCodes, sqlFile.toPath.toString)).lineStream_!.mkString("\n")).toOption
 
-    // Runs `fix` (applies whatever the plugin's fix-compatible rules can
-    // rewrite, in place) then `lint` on the result (to see what's still
-    // flagged -- the detect-only rules, which `fix` never touches). Returns
-    // (rewritten SQL text, iff it actually changed; rule codes still
-    // flagged after fixing).
+    // `lint` runs FIRST, against the ORIGINAL file, so the codes it collects
+    // are the actual violations in the code as written -- then `fix` runs
+    // and may rewrite the file in place. Doing it in the other order (fix
+    // then lint) meant every auto-fixable code's violation was already gone
+    // by the time lint ran, so it never appeared in the flagged set -- only
+    // the 7 detect-only codes (which `fix` never touches) survived. Worse,
+    // a fix that introduces a new shape (e.g. SPARKSQL_L005 wrapping the
+    // accuracy arg in `cast(...)`) got that new shape flagged by the
+    // post-fix lint as a DIFFERENT code (SPARKSQLCAST_L001) -- a
+    // self-referential false positive on code that was just correctly
+    // fixed. Linting the original avoids both.
     def analyze(original: String, sqlFile: File): (Option[String], Set[String]) = {
-      sqlfluffOutput(Seq("fix", "-f"), sqlFile)
-      val fixed = Try(scala.io.Source.fromFile(sqlFile).mkString).toOption
-      val stillFlagged = sqlfluffOutput(Seq("lint"), sqlFile) match {
+      val flagged = sqlfluffOutput(Seq("lint"), sqlFile) match {
         case Some(output) => output.linesIterator.collect { case lintLine(code) => code }.toSet
         case None => Set.empty[String]
       }
+      sqlfluffOutput(Seq("fix", "-f"), sqlFile)
+      val fixed = Try(scala.io.Source.fromFile(sqlFile).mkString).toOption
       // We don't care about whitespace-only changes.
       val rewritten = fixed.filter(newSQL => newSQL.filterNot(_.isWhitespace) != original.filterNot(_.isWhitespace))
-      (rewritten, stillFlagged)
+      (rewritten, flagged)
     }
 
     def matchOnTree(e: Tree): Patch = {
