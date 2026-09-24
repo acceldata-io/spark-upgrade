@@ -111,7 +111,10 @@ public final class Runner {
         }
     }
 
-    private static final class Hunk {
+    /** One contiguous run of changed lines inside a unified-diff hunk --
+     * NOT the whole hunk. See {@link #parseHunks}. Package-private so
+     * {@code RunnerHunkParsingTest} can assert on it directly. */
+    static final class Hunk {
         final int newStartLine;
         final String snippet;
 
@@ -122,29 +125,75 @@ public final class Runner {
     }
 
     // Standard unified-diff hunk header: "@@ -oldStart,oldLines +newStart,newLines @@[ trailer]".
-    // Confirmed against a real spike this session that Result.diff() produces
-    // exactly this shape, hunk-parseable the same way PySparklerOutputParser
-    // already derives its classification from a real diff rather than trusting
-    // a label the source engine emits.
-    private static List<Hunk> parseHunks(String diff) {
+    // Confirmed against a real spike that Result.diff() produces exactly this
+    // shape, hunk-parseable the same way PySparklerOutputParser already derives
+    // its classification from a real diff rather than trusting a label the
+    // source engine emits.
+    //
+    // Returns one entry per contiguous run of CHANGED lines, not one per hunk.
+    // Both halves of that matter, and both were real bugs found by reading a
+    // real analyze run's findings.json against the fixture's own line numbers
+    // (2026-09-24):
+    //
+    //  1. The hunk header's `+newStart` is where the hunk BEGINS, which for a
+    //     3-line-context diff is three lines above the first line that actually
+    //     changed. Every Java finding's reported line was therefore three lines
+    //     early -- e.g. SparkShuffleWriteMetricsRename reported
+    //     MetricsReporter.java:7 (`public class MetricsReporter {`) for a change
+    //     that is really on lines 10-12. A finding that points a reviewer at the
+    //     wrong line is worse than useless in a tool whose whole contract is
+    //     "auditable, human-reviewable findings".
+    //  2. Two independent occurrences close enough to share one hunk collapsed
+    //     into a single finding -- SchemaBuilder.java's `array()` (line 12) and
+    //     `map()` (line 16) were reported once, as one finding at line 9. That
+    //     is under-reporting, the same class of bug as reporting success for
+    //     work not done.
+    //
+    // Line accounting is the standard unified-diff rule: context and `+` lines
+    // advance the new-file counter, `-` lines do not (they exist only in the
+    // old file). A `\` line ("\ No newline at end of file") is metadata and
+    // advances nothing.
+    static List<Hunk> parseHunks(String diff) {
         List<Hunk> hunks = new ArrayList<>();
         String[] lines = diff.split("\n", -1);
         int i = 0;
         while (i < lines.length) {
-            String line = lines[i];
-            if (line.startsWith("@@")) {
-                int newStart = parseNewStartLine(line);
-                StringBuilder snippet = new StringBuilder();
-                int j = i + 1;
-                while (j < lines.length && !lines[j].startsWith("@@")) {
-                    snippet.append(lines[j]).append('\n');
-                    j++;
-                }
-                hunks.add(new Hunk(newStart, snippet.toString().trim()));
-                i = j;
-            } else {
+            if (!lines[i].startsWith("@@")) {
                 i++;
+                continue;
             }
+            int newLine = parseNewStartLine(lines[i]);
+            int blockStart = 0;
+            StringBuilder block = new StringBuilder();
+
+            int j = i + 1;
+            for (; j < lines.length && !lines[j].startsWith("@@"); j++) {
+                String body = lines[j];
+                if (body.startsWith("\\")) {
+                    continue;
+                }
+                boolean added = body.startsWith("+");
+                boolean removed = body.startsWith("-");
+                if (added || removed) {
+                    if (block.length() == 0) {
+                        blockStart = newLine;
+                    }
+                    block.append(body).append('\n');
+                    if (added) {
+                        newLine++;
+                    }
+                } else {
+                    if (block.length() > 0) {
+                        hunks.add(new Hunk(blockStart, block.toString().trim()));
+                        block.setLength(0);
+                    }
+                    newLine++;
+                }
+            }
+            if (block.length() > 0) {
+                hunks.add(new Hunk(blockStart, block.toString().trim()));
+            }
+            i = j;
         }
         return hunks;
     }
