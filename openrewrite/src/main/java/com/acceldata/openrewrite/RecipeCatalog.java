@@ -3,9 +3,23 @@ package com.acceldata.openrewrite;
 import org.openrewrite.Recipe;
 import org.openrewrite.config.Environment;
 
+import com.acceldata.openrewrite.spark.SparkAccumulatorV1Detect;
+import com.acceldata.openrewrite.spark.SparkCalendarIntervalUsageDetect;
 import com.acceldata.openrewrite.spark.SparkEmptyCollectionTypeDetect;
+import com.acceldata.openrewrite.spark.SparkExecutorPluginDetect;
+import com.acceldata.openrewrite.spark.SparkGroupByKeyCountWarn;
+import com.acceldata.openrewrite.spark.SparkHashOnMapTypeDetect;
+import com.acceldata.openrewrite.spark.SparkHiveContextConstructorDetect;
+import com.acceldata.openrewrite.spark.SparkInvalidTimeZoneIdDetect;
+import com.acceldata.openrewrite.spark.SparkIsRunningLocallyDetect;
+import com.acceldata.openrewrite.spark.SparkJsonEmptyStringDetect;
+import com.acceldata.openrewrite.spark.SparkNegativeDecimalScaleDetect;
 import com.acceldata.openrewrite.spark.SparkPathOptionConflictDetect;
+import com.acceldata.openrewrite.spark.SparkProcessingTimeDetect;
+import com.acceldata.openrewrite.spark.SparkSelfJoinAmbiguousDetect;
 import com.acceldata.openrewrite.spark.SparkShuffleWriteMetricsRename;
+import com.acceldata.openrewrite.spark.SparkSqlContextConstructorDetect;
+import com.acceldata.openrewrite.spark.SparkSqlLiteralExtract;
 import com.acceldata.openrewrite.spark.SparkUnionAllRename;
 
 import java.util.ArrayList;
@@ -82,10 +96,32 @@ public final class RecipeCatalog {
 
     private static Map<String, Recipe> handWritten() {
         Map<String, Recipe> byId = new LinkedHashMap<>();
+        // Tier 1 (2026-09-24): exact, type-attribution-safe renames, wired
+        // into codegen's fix mode.
         byId.put(SparkUnionAllRename.class.getName(), new SparkUnionAllRename());
         byId.put(SparkShuffleWriteMetricsRename.class.getName(), new SparkShuffleWriteMetricsRename());
+        // Everything else: Tier 3, detect-only (JavaRuleRegistry is the
+        // authority on tier; this list is just "what exists").
         byId.put(SparkPathOptionConflictDetect.class.getName(), new SparkPathOptionConflictDetect());
         byId.put(SparkEmptyCollectionTypeDetect.class.getName(), new SparkEmptyCollectionTypeDetect());
+        byId.put(SparkAccumulatorV1Detect.class.getName(), new SparkAccumulatorV1Detect());
+        byId.put(SparkSqlContextConstructorDetect.class.getName(), new SparkSqlContextConstructorDetect());
+        byId.put(SparkHiveContextConstructorDetect.class.getName(), new SparkHiveContextConstructorDetect());
+        byId.put(SparkProcessingTimeDetect.class.getName(), new SparkProcessingTimeDetect());
+        byId.put(SparkGroupByKeyCountWarn.class.getName(), new SparkGroupByKeyCountWarn());
+        byId.put(SparkHashOnMapTypeDetect.class.getName(), new SparkHashOnMapTypeDetect());
+        byId.put(SparkSelfJoinAmbiguousDetect.class.getName(), new SparkSelfJoinAmbiguousDetect());
+        byId.put(SparkNegativeDecimalScaleDetect.class.getName(), new SparkNegativeDecimalScaleDetect());
+        byId.put(SparkExecutorPluginDetect.class.getName(), new SparkExecutorPluginDetect());
+        byId.put(SparkIsRunningLocallyDetect.class.getName(), new SparkIsRunningLocallyDetect());
+        byId.put(SparkJsonEmptyStringDetect.class.getName(), new SparkJsonEmptyStringDetect());
+        byId.put(SparkCalendarIntervalUsageDetect.class.getName(), new SparkCalendarIntervalUsageDetect());
+        byId.put(SparkInvalidTimeZoneIdDetect.class.getName(), new SparkInvalidTimeZoneIdDetect());
+        // Plumbing, not a migration finding of its own -- see its own doc
+        // comment. JavaRuleRegistry does not carry an entry for this id;
+        // JavaAnalysisRunner filters it out of the findings stream before
+        // JavaRuleRegistry ever sees it.
+        byId.put(SparkSqlLiteralExtract.class.getName(), new SparkSqlLiteralExtract());
         return byId;
     }
 }

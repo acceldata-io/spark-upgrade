@@ -41,7 +41,20 @@ import java.util.stream.Collectors;
  *
  * <p>Args: {@code --repo-root <path>} {@code --files-list <path>} (newline-
  * delimited absolute .java paths) {@code --classpath <path-separator-joined>}
- * {@code --recipes <comma-list|all>} {@code --output <jsonl-path>}.
+ * {@code --recipes <comma-list|all>} {@code --output <jsonl-path>} {@code
+ * --mode <analyze|fix>} (default {@code analyze}).
+ *
+ * <p>{@code analyze} mode is always dry-run: no write-to-disk API is ever
+ * called, matching this doc's original contract exactly. {@code fix} mode
+ * (added 2026-09-24, for the two Tier 1 recipes {@code codegen} now wires
+ * up -- {@code SparkUnionAllRename}/{@code SparkShuffleWriteMetricsRename})
+ * additionally writes each recipe's result back to disk, the Java-side
+ * equivalent of {@code CliScalafixRunner} running {@code scalafixAll fix}
+ * instead of {@code --check}. Both modes emit the same JSONL findings
+ * stream either way -- {@code fix} mode's caller (spark-migrate-cli's
+ * codegen Phase A) reads it the same way {@code analyze} mode's caller does,
+ * so a Tier 1 rewrite that fires during codegen is still a reportable,
+ * auditable finding, not a silent mutation.
  *
  * <p>Output is JSONL, one record per line: {@code {"type":"finding", ...}}
  * or {@code {"type":"warning", ...}} -- mirrors {@code
@@ -59,6 +72,7 @@ public final class Runner {
         String classpathArg = opts.getOrDefault("classpath", "");
         String recipesArg = opts.getOrDefault("recipes", "all");
         String outputArg = require(opts, "output");
+        boolean fixMode = "fix".equals(opts.getOrDefault("mode", "analyze"));
 
         Path repoRoot = Paths.get(repoRootArg).toAbsolutePath();
         Path outputPath = Paths.get(outputArg);
@@ -87,16 +101,46 @@ public final class Runner {
                 }
             }
 
+            // fix mode runs sequentially, each recipe's own output feeding
+            // the next -- mirrors PhaseARunner's "one scalafixAll invocation
+            // per Tier 1 rule, sequentially, because two rules can collide
+            // on the same source span" rationale, now that this pass wires
+            // real writes rather than only dry-run diffs.
+            List<SourceFile> current = parsedOk;
             List<Recipe> recipes = RecipeCatalog.resolve(recipesArg);
             for (Recipe recipe : recipes) {
                 String recipeId = recipe.getName() != null ? recipe.getName() : recipe.getDisplayName();
-                LargeSourceSet sourceSet = new InMemoryLargeSourceSet(parsedOk);
+                LargeSourceSet sourceSet = new InMemoryLargeSourceSet(current);
                 RecipeRun run = recipe.run(sourceSet, ctx);
+                List<SourceFile> next = new ArrayList<>(current);
                 for (Result result : run.getChangeset().getAllResults()) {
                     emitFindingsForResult(out, recipeId, result);
+                    if (fixMode && result.getAfter() != null) {
+                        writeResultToDisk(repoRoot, result);
+                        replaceInPlace(next, result.getBefore(), (SourceFile) result.getAfter());
+                    }
                 }
+                current = next;
             }
         }
+    }
+
+    private static void replaceInPlace(List<SourceFile> files, @org.openrewrite.internal.lang.Nullable SourceFile before, SourceFile after) {
+        if (before == null) {
+            return;
+        }
+        for (int i = 0; i < files.size(); i++) {
+            if (files.get(i) == before) {
+                files.set(i, after);
+                return;
+            }
+        }
+    }
+
+    private static void writeResultToDisk(Path repoRoot, Result result) throws IOException {
+        Path target = repoRoot.resolve(result.getAfter().getSourcePath());
+        Files.createDirectories(target.getParent());
+        Files.write(target, result.getAfter().printAll().getBytes(StandardCharsets.UTF_8));
     }
 
     private static void emitFindingsForResult(BufferedWriter out, String recipeId, Result result) throws IOException {

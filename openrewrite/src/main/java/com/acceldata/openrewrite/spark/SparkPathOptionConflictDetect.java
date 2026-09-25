@@ -5,6 +5,7 @@ import org.openrewrite.Recipe;
 import org.openrewrite.TreeVisitor;
 import org.openrewrite.internal.lang.Nullable;
 import org.openrewrite.java.JavaIsoVisitor;
+import org.openrewrite.java.MethodMatcher;
 import org.openrewrite.java.tree.Expression;
 import org.openrewrite.java.tree.J;
 import org.openrewrite.marker.SearchResult;
@@ -15,11 +16,26 @@ import org.openrewrite.marker.SearchResult;
  * path argument to {@code DataFrameReader#load}/{@code DataFrameWriter#save}
  * -- purely syntactic, high confidence. Detect-only: the paired legacy config
  * ({@code spark.sql.legacy.pathOptionBehavior.enabled}) already exists in
- * {@code LegacyConfigRegistry} on the Scala side and is reusable as-is
- * (config existence doesn't depend on source language), but Phase B/
- * config-injection wiring is out of scope for this analyze-only pass.
+ * {@code LegacyConfigRegistry} on the Scala side (config existence doesn't
+ * depend on source language) -- Tier 2 as of 2026-09-25, this recipe's id
+ * cross-linked into that same config's {@code detectionRuleIds} so Phase B
+ * (spark-migrate-cli's {@code PhaseBRunner}) actually injects it.
+ *
+ * <p>Matches by {@link MethodMatcher} against the real {@code
+ * DataFrameReader}/{@code DataFrameWriter} signatures (verified via {@code
+ * javap} against the real 2.4.8 jar, 2026-09-24), not by method name alone --
+ * the original implementation fired on any method literally named {@code
+ * load}/{@code save} with an argument, which is a false positive on any
+ * unrelated builder of that shape (code review 2026-09-24 SS4.5). This is
+ * also what unblocks promoting this recipe off Tier 3 later: a name-only
+ * match must never be promoted, a type-checked one safely can be once proven.
  */
 public class SparkPathOptionConflictDetect extends Recipe {
+
+    private static final MethodMatcher LOAD_MATCHER =
+            new MethodMatcher("org.apache.spark.sql.DataFrameReader load(..)");
+    private static final MethodMatcher SAVE_MATCHER =
+            new MethodMatcher("org.apache.spark.sql.DataFrameWriter save(..)");
 
     @Override
     public String getDisplayName() {
@@ -39,7 +55,7 @@ public class SparkPathOptionConflictDetect extends Recipe {
             public J.MethodInvocation visitMethodInvocation(J.MethodInvocation method, ExecutionContext ctx) {
                 J.MethodInvocation m = super.visitMethodInvocation(method, ctx);
                 String name = m.getSimpleName();
-                boolean isLoadOrSave = "load".equals(name) || "save".equals(name);
+                boolean isLoadOrSave = LOAD_MATCHER.matches(m) || SAVE_MATCHER.matches(m);
                 if (isLoadOrSave && hasRealArgument(m) && chainHasPathOption(m.getSelect())) {
                     return SearchResult.found(
                             m,

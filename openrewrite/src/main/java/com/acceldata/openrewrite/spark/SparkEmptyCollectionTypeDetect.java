@@ -25,9 +25,10 @@ import org.openrewrite.marker.SearchResult;
  * registration. A zero-argument varargs call parses as a single {@code
  * J.Empty} argument, confirmed against a real spike this session.
  *
- * <p>Detect-only. Feeds {@code spark.sql.legacy.createEmptyCollectionUsingStringType},
- * reusable as-is from {@code LegacyConfigRegistry} once Phase B is wired for
- * Java (out of scope this pass).
+ * <p>Detect-only. Feeds {@code spark.sql.legacy.createEmptyCollectionUsingStringType}
+ * -- Tier 2 as of 2026-09-25, cross-linked into the existing
+ * {@code LegacyConfigRegistry} entry's {@code detectionRuleIds} so Phase B
+ * (spark-migrate-cli's {@code PhaseBRunner}) actually injects it.
  */
 public class SparkEmptyCollectionTypeDetect extends Recipe {
 
