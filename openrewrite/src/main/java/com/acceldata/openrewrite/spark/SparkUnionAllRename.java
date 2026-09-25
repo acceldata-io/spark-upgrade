@@ -1,11 +1,10 @@
 package com.acceldata.openrewrite.spark;
 
-import org.openrewrite.ExecutionContext;
 import org.openrewrite.Recipe;
-import org.openrewrite.TreeVisitor;
-import org.openrewrite.java.JavaIsoVisitor;
-import org.openrewrite.java.MethodMatcher;
-import org.openrewrite.java.tree.J;
+import org.openrewrite.java.ChangeMethodName;
+
+import java.util.Collections;
+import java.util.List;
 
 /**
  * Java-side counterpart to the Scalafix {@code UnionRewrite} rule: {@code
@@ -17,16 +16,17 @@ import org.openrewrite.java.tree.J;
  * without re-deriving it), so this rewrite is valid pre-migration too and
  * cannot break the pre-3.5.5 build.
  *
- * <p>Tier-1-*shaped* on the Scala side, but every recipe in this jar is
- * reported at Tier 3 by {@code JavaRuleRegistry} until individually audited
- * (spark-migrate-java-openrewrite-integration-2026-09-18.md SS5 item 4) --
- * this analyze-only pass never runs codegen, so the tier label here has no
- * auto-apply consequence yet.
+ * <p>Promoted to Tier 1 (2026-09-24 session): delegates to OpenRewrite's own
+ * {@link ChangeMethodName} instead of a hand-rolled {@code
+ * m.withName(m.getName().withSimpleName(...))} visitor -- the code review
+ * that shipped the original four Java recipes (2026-09-24 SS4.6) flagged the
+ * hand-rolled form as leaving the LST's method *type* still pointing at the
+ * old symbol, harmless for a dry-run-only analyze pass but a real risk once
+ * codegen composes recipes and actually writes the result to disk.
+ * {@code ChangeMethodName} keeps type attribution correct, which matters now
+ * that this recipe is wired into {@code codegen}'s fix mode.
  */
 public class SparkUnionAllRename extends Recipe {
-
-    private static final MethodMatcher MATCHER =
-            new MethodMatcher("org.apache.spark.sql.Dataset unionAll(org.apache.spark.sql.Dataset)");
 
     @Override
     public String getDisplayName() {
@@ -39,16 +39,14 @@ public class SparkUnionAllRename extends Recipe {
     }
 
     @Override
-    public TreeVisitor<?, ExecutionContext> getVisitor() {
-        return new JavaIsoVisitor<ExecutionContext>() {
-            @Override
-            public J.MethodInvocation visitMethodInvocation(J.MethodInvocation method, ExecutionContext ctx) {
-                J.MethodInvocation m = super.visitMethodInvocation(method, ctx);
-                if (MATCHER.matches(m)) {
-                    return m.withName(m.getName().withSimpleName("union"));
-                }
-                return m;
-            }
-        };
+    public List<Recipe> getRecipeList() {
+        return Collections.singletonList(
+                new ChangeMethodName(
+                        "org.apache.spark.sql.Dataset unionAll(org.apache.spark.sql.Dataset)",
+                        "union",
+                        false,
+                        false
+                )
+        );
     }
 }

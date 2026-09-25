@@ -23,26 +23,89 @@ object SparkSQLCallExternal {
    *
    * Probing once also avoids paying two failed process spawns per SQL literal
    * on every machine that doesn't have the tool. */
-  lazy val available: Boolean =
-    Try(Process(Seq("sqlfluff", "--version")).!(ProcessLogger(_ => (), _ => ())) == 0).getOrElse(false)
-}
-
-class SparkSQLCallExternal extends SemanticRule("SparkSQLCallExternal") {
-
-  // The full Family K rule set this fork's sqlfluff plugin (../../../sql,
-  // package sqlfluff-plugin-sparksql-upgrade) implements. Explicit allowlist
-  // rather than plain `sqlfluff fix`/`sqlfluff lint` with no `--rules`:
-  // unrestricted, sqlfluff also applies/reports its own generic SQL style
-  // rules, which would get misattributed to a Spark migration fix
-  // (gap-analysis 2026-08-21 SS3.4).
-  private val pluginRuleCodes: Set[String] = Set(
+  /** The full Family K rule set this fork's sqlfluff plugin (../../../sql,
+   * package sqlfluff-plugin-sparksql-upgrade) implements. Lives on the
+   * companion so `available` can probe with the SAME allowlist the rule
+   * actually uses. */
+  val pluginRuleCodes: Set[String] = Set(
     "SPARKSQLCAST_L001", "RESERVEDROPERTIES_L002", "NOCHARS_L003", "FORMATSTRONEINDEX_L004",
     "SPARKSQL_L004", "SPARKSQL_L005", "GLOBALTEMPVIEW_L006", "HISTOGRAMNUMERIC_L007",
     "BYTEPADDING_L008", "BINARYCONV_L009", "CTEPRECEDENCE_L010", "TYPEDPARTITION_L011",
     "TRANSFORMDELIM_L012"
   )
 
-  private val ruleCodes = pluginRuleCodes.toSeq.sorted.mkString(",")
+  val ruleCodes: String = pluginRuleCodes.toSeq.sorted.mkString(",")
+
+  lazy val available: Boolean = probe().isEmpty
+
+  /** `None` when Family K can really run; `Some(reason)` otherwise.
+   *
+   * This used to probe `sqlfluff --version`, which was not the same question.
+   * Two real environments pass `--version` and still produce zero Family K
+   * findings:
+   *
+   *   1. **`sqlfluff` runs but `lint` crashes.** sqlfluff 2.3.2's
+   *      `click_deprecated_option` raises `ValueError: Expected `deprecated`
+   *      value for 'disable_progress_bar'` under click >= 8.2, during
+   *      argument parsing -- so `--version` is fine and every `lint`/`fix`
+   *      dies with a traceback and exit 1, which is indistinguishable by exit
+   *      code from the normal "found violations" case. Reproduced 2026-09-24
+   *      in the venv PROJECT-GUIDE.md SS0.4 step 3b tells you to build:
+   *      installing `pysparkler` alongside the plugin resolves click 8.5.0,
+   *      while a plugin-only venv resolves 8.1.8 and works. The tool then
+   *      reported a Family K-heavy fixture as having zero SQL findings, and
+   *      `analyze` said SUCCESS.
+   *   2. **`sqlfluff` runs but the plugin is missing or stale.** PyPI's
+   *      published plugin ships only 6 of these 13 codes (same SS0.4 note);
+   *      an unregistered code is a `WARNING Tried to allowlist unknown rule
+   *      references: [...]` line, not an error, so the run finishes clean.
+   *
+   * Both are exactly the failure this rule's own doc comment above calls "the
+   * worst failure mode an effort-estimation tool has". Probing with a real
+   * one-line `lint` against the real allowlist answers the real question:
+   * sqlfluff's human format always terminates with `All Finished!`, and names
+   * any code it could not resolve. */
+  private def probe(): Option[String] = {
+    val probeFile = File.createTempFile("sqlfluff-probe", ".sql")
+    probeFile.deleteOnExit()
+    val bw = new BufferedWriter(new FileWriter(probeFile))
+    bw.write("SELECT 1\n")
+    bw.close()
+
+    val out = new StringBuilder
+    val ran = Try {
+      Process(Seq("sqlfluff", "lint", "--dialect", "sparksql", "--rules", ruleCodes, probeFile.toPath.toString))
+        .!(ProcessLogger(l => { out.append(l).append('\n'); () }, _ => ()))
+      out.toString
+    }.toOption
+
+    ran match {
+      case None =>
+        Some("sqlfluff is not on PATH")
+      case Some(text) if !text.contains("All Finished!") =>
+        Some("sqlfluff is on PATH but could not complete a `lint` run (it exited without finishing -- " +
+          "commonly a click/sqlfluff version incompatibility; run the command by hand to see the traceback)")
+      case Some(text) if text.contains("Tried to allowlist unknown rule references") =>
+        Some("sqlfluff is on PATH but the sparksql-upgrade plugin is missing or stale -- it does not " +
+          "register all 13 Family K rule codes")
+      case Some(_) => None
+    }
+  }
+
+  /** The reason Family K could not run, for the finding's own text. */
+  lazy val unavailableReason: String = probe().getOrElse("")
+}
+
+class SparkSQLCallExternal extends SemanticRule("SparkSQLCallExternal") {
+
+  // Explicit allowlist rather than plain `sqlfluff fix`/`sqlfluff lint` with
+  // no `--rules`: unrestricted, sqlfluff also applies/reports its own generic
+  // SQL style rules, which would get misattributed to a Spark migration fix
+  // (gap-analysis 2026-08-21 SS3.4). The list itself lives on the companion
+  // so the availability probe can use the same one.
+  private val pluginRuleCodes: Set[String] = SparkSQLCallExternal.pluginRuleCodes
+
+  private val ruleCodes = SparkSQLCallExternal.ruleCodes
 
   // e.g. "L:   1 | P:   8 | HISTOGRAMNUMERIC_L007 | histogram_numeric(...)..."
   // -- sqlfluff's human-readable lint format. Not `--format json`: the rules
@@ -128,9 +191,10 @@ class SparkSQLCallExternal extends SemanticRule("SparkSQLCallExternal") {
                     RuleFinding.report(
                       RuleChange(
                         "SparkSQLCallExternal",
-                        "sqlfluff is not available on PATH, so the sparksql-upgrade plugin's Family K SQL rules did NOT run against " +
-                          "the literal SQL in this file. Absence of SQL findings here means 'not checked', not 'clean'.",
-                        "Install sqlfluff + the sqlfluff-plugin-sparksql-upgrade package (see spark-upgrade/sql) and re-run analysis.",
+                        s"Family K SQL rules did NOT run against the literal SQL in this file: " +
+                          s"${SparkSQLCallExternal.unavailableReason}. Absence of SQL findings here means " +
+                          "'not checked', not 'clean'.",
+                        "Install/repair sqlfluff + the sqlfluff-plugin-sparksql-upgrade package (see spark-upgrade/sql) and re-run analysis.",
                         Position.Range(param.pos.input, param.pos.end, param.pos.end)
                       )
                     )

@@ -56,14 +56,24 @@ lazy val root = (project in file("."))
       // Spark version" convention ../scalafix's own input/ project uses.
       // Plain `%`, not `%%`: Java doesn't care about the artifact's own
       // Scala-binary suffix, only its compiled API.
-      "org.apache.spark" % "spark-sql_2.11" % "2.4.8" % Test
+      "org.apache.spark" % "spark-sql_2.11" % "2.4.8" % Test,
+      // Only spark-hive needs its own entry (SparkHiveContextConstructorDetectTest):
+      // spark-core is already a transitive dependency of spark-sql, and
+      // MethodMatcher type attribution needs the real classpath either way.
+      "org.apache.spark" % "spark-hive_2.11" % "2.4.8" % Test
     ),
     // Runs JUnit5 tests under sbt (RewriteTest specs are JUnit5, not
     // ScalaTest) -- needs the matching project/plugins.sbt entry too.
     libraryDependencies += "com.github.sbt.junit" % "jupiter-interface" % "0.15.1" % Test,
     // javadoc's strict Java-17 HTML/doclint checking chokes on this module's
     // Javadoc comments; not worth fighting for a local-only SNAPSHOT jar.
-    Compile / packageDoc / publishArtifact := false
+    Compile / packageDoc / publishArtifact := false,
+    // Each RewriteTest spec builds its own JavaParser + real-jar type
+    // attribution; sbt's default forked-test heap isn't enough once the
+    // recipe count grew past ~15 test classes in the 2026-09-24 session
+    // (observed: real OutOfMemoryError mid-suite, not a flaky failure).
+    Test / fork := true,
+    Test / javaOptions += "-Xmx3g"
   )
 
 Compile / mainClass := Some("com.acceldata.openrewrite.Runner")
