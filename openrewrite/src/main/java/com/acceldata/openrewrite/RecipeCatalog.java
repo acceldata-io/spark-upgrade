@@ -3,8 +3,13 @@ package com.acceldata.openrewrite;
 import org.openrewrite.Recipe;
 import org.openrewrite.config.Environment;
 
+import com.acceldata.openrewrite.spark.SparkAccumulableInfoConstructionDetect;
 import com.acceldata.openrewrite.spark.SparkAccumulatorV1Detect;
+import com.acceldata.openrewrite.spark.SparkAddMonthsUsageWarn;
+import com.acceldata.openrewrite.spark.SparkAnalysisExceptionPlanUsageDetect;
 import com.acceldata.openrewrite.spark.SparkCalendarIntervalUsageDetect;
+import com.acceldata.openrewrite.spark.SparkDateTimeFormatPatternDetect;
+import com.acceldata.openrewrite.spark.SparkDuplicateMapKeyLiteralDetect;
 import com.acceldata.openrewrite.spark.SparkEmptyCollectionTypeDetect;
 import com.acceldata.openrewrite.spark.SparkExecutorPluginDetect;
 import com.acceldata.openrewrite.spark.SparkGroupByKeyCountWarn;
@@ -13,7 +18,13 @@ import com.acceldata.openrewrite.spark.SparkHiveContextConstructorDetect;
 import com.acceldata.openrewrite.spark.SparkInvalidTimeZoneIdDetect;
 import com.acceldata.openrewrite.spark.SparkIsRunningLocallyDetect;
 import com.acceldata.openrewrite.spark.SparkJsonEmptyStringDetect;
+import com.acceldata.openrewrite.spark.SparkLog4j1UsageDetect;
+import com.acceldata.openrewrite.spark.SparkMapTypeKeyInCreateMapDetect;
+import com.acceldata.openrewrite.spark.SparkMesosUsageDetect;
+import com.acceldata.openrewrite.spark.SparkMllibSgdModelUsageDetect;
+import com.acceldata.openrewrite.spark.SparkNaFunctionsReplaceDetect;
 import com.acceldata.openrewrite.spark.SparkNegativeDecimalScaleDetect;
+import com.acceldata.openrewrite.spark.SparkOneHotEncoderEstimatorUsageDetect;
 import com.acceldata.openrewrite.spark.SparkPathOptionConflictDetect;
 import com.acceldata.openrewrite.spark.SparkProcessingTimeDetect;
 import com.acceldata.openrewrite.spark.SparkSelfJoinAmbiguousDetect;
@@ -117,6 +128,20 @@ public final class RecipeCatalog {
         byId.put(SparkJsonEmptyStringDetect.class.getName(), new SparkJsonEmptyStringDetect());
         byId.put(SparkCalendarIntervalUsageDetect.class.getName(), new SparkCalendarIntervalUsageDetect());
         byId.put(SparkInvalidTimeZoneIdDetect.class.getName(), new SparkInvalidTimeZoneIdDetect());
+        // 2026-09-29 coverage review batch -- all Tier 3, detect-only, per
+        // this session's policy for every new rule (see each class's own
+        // doc comment for the migration-guide item and javap verification).
+        byId.put(SparkAccumulableInfoConstructionDetect.class.getName(), new SparkAccumulableInfoConstructionDetect());
+        byId.put(SparkAnalysisExceptionPlanUsageDetect.class.getName(), new SparkAnalysisExceptionPlanUsageDetect());
+        byId.put(SparkNaFunctionsReplaceDetect.class.getName(), new SparkNaFunctionsReplaceDetect());
+        byId.put(SparkDuplicateMapKeyLiteralDetect.class.getName(), new SparkDuplicateMapKeyLiteralDetect());
+        byId.put(SparkMapTypeKeyInCreateMapDetect.class.getName(), new SparkMapTypeKeyInCreateMapDetect());
+        byId.put(SparkAddMonthsUsageWarn.class.getName(), new SparkAddMonthsUsageWarn());
+        byId.put(SparkDateTimeFormatPatternDetect.class.getName(), new SparkDateTimeFormatPatternDetect());
+        byId.put(SparkMesosUsageDetect.class.getName(), new SparkMesosUsageDetect());
+        byId.put(SparkLog4j1UsageDetect.class.getName(), new SparkLog4j1UsageDetect());
+        byId.put(SparkOneHotEncoderEstimatorUsageDetect.class.getName(), new SparkOneHotEncoderEstimatorUsageDetect());
+        byId.put(SparkMllibSgdModelUsageDetect.class.getName(), new SparkMllibSgdModelUsageDetect());
         // Plumbing, not a migration finding of its own -- see its own doc
         // comment. JavaRuleRegistry does not carry an entry for this id;
         // JavaAnalysisRunner filters it out of the findings stream before

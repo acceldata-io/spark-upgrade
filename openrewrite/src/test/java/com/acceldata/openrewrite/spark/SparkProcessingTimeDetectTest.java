@@ -14,7 +14,7 @@ class SparkProcessingTimeDetectTest implements RewriteTest {
     }
 
     @Test
-    void flagsProcessingTimeApply() {
+    void rewritesProcessingTimeApplyToTriggerProcessingTime() {
         rewriteRun(
                 java(
                         """
@@ -28,12 +28,40 @@ class SparkProcessingTimeDetectTest implements RewriteTest {
                         }
                         """,
                         """
+                        import org.apache.spark.sql.streaming.Trigger;
+
+                        class Streams {
+                            Trigger every5s() {
+                                return Trigger.ProcessingTime(5000);
+                            }
+                        }
+                        """
+                )
+        );
+    }
+
+    @Test
+    void rewritesProcessingTimeCreateToTriggerProcessingTime() {
+        rewriteRun(
+                java(
+                        """
+                        import java.util.concurrent.TimeUnit;
                         import org.apache.spark.sql.streaming.ProcessingTime;
                         import org.apache.spark.sql.streaming.Trigger;
 
                         class Streams {
                             Trigger every5s() {
-                                return /*~~(ProcessingTime is removed in Spark 3.x; use Trigger.ProcessingTime(...) instead (same argument shape).)~~>*/ProcessingTime.apply(5000);
+                                return ProcessingTime.create(5, TimeUnit.SECONDS);
+                            }
+                        }
+                        """,
+                        """
+                        import java.util.concurrent.TimeUnit;
+                        import org.apache.spark.sql.streaming.Trigger;
+
+                        class Streams {
+                            Trigger every5s() {
+                                return Trigger.ProcessingTime(5, TimeUnit.SECONDS);
                             }
                         }
                         """

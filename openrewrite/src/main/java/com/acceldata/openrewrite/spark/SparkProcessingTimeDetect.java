@@ -1,12 +1,8 @@
 package com.acceldata.openrewrite.spark;
 
-import org.openrewrite.ExecutionContext;
 import org.openrewrite.Recipe;
-import org.openrewrite.TreeVisitor;
-import org.openrewrite.java.JavaIsoVisitor;
-import org.openrewrite.java.MethodMatcher;
-import org.openrewrite.java.tree.J;
-import org.openrewrite.marker.SearchResult;
+import org.openrewrite.java.ChangeMethodName;
+import org.openrewrite.java.ChangeMethodTargetToStatic;
 
 import java.util.Arrays;
 import java.util.List;
@@ -24,50 +20,66 @@ import java.util.List;
  * {@code public static} methods on the {@code ProcessingTime} class itself,
  * not only on its Scala-only {@code MODULE$} singleton.
  *
- * <p>Detect-only rather than an auto-rewrite: the exact-rename precedent this
- * session promoted to Tier 1 ({@code SparkUnionAllRename}, {@code
- * SparkShuffleWriteMetricsRename}) only ever needs {@code ChangeMethodName}
- * to change the METHOD on the same class. This rewrite needs to change both
- * the target class ({@code ProcessingTime} &#8594; {@code Trigger}) and the
- * method name ({@code apply}/{@code create} &#8594; {@code ProcessingTime})
- * at once, which needs a {@code JavaTemplate}-based rewrite with its own
- * classpath-resolution setup -- not attempted this pass rather than risk a
- * composed-recipe rewrite nobody verified end to end.
+ * <p>Promoted to Tier 1 (2026-09-29 coverage review): both the removed
+ * factory's return type ({@code Trigger}, since {@code ProcessingTime}
+ * itself implemented that interface) and the replacement's argument shape
+ * are identical, so this composes to an exact, semantics-preserving
+ * rewrite rather than a structural one -- unlike {@code
+ * SparkSqlContextConstructorDetect}/{@code SparkHiveContextConstructorDetect},
+ * where the replacement changes the shape of the whole call (a constructor
+ * becomes a multi-step builder chain) and the resulting variable's type
+ * changes too, so those stay Tier 3 (see their own doc comments). Here the
+ * call site's own type never changes -- only which class holds the static
+ * method and what it's named -- so {@link ChangeMethodTargetToStatic}
+ * (retarget {@code ProcessingTime} &#8594; {@code Trigger}, same method name)
+ * composed with {@link ChangeMethodName} (rename {@code apply}/{@code create}
+ * &#8594; {@code ProcessingTime}) expresses it exactly, the same
+ * getRecipeList()-composition discipline {@code SparkUnionAllRename} already
+ * established for a single-step rename. Verified end to end via
+ * {@code SparkProcessingTimeDetectTest} before promoting, not assumed from
+ * the API alone.
  */
 public class SparkProcessingTimeDetect extends Recipe {
 
-    private static final List<MethodMatcher> MATCHERS = Arrays.asList(
-            new MethodMatcher("org.apache.spark.sql.streaming.ProcessingTime apply(long)"),
-            new MethodMatcher("org.apache.spark.sql.streaming.ProcessingTime create(long, java.util.concurrent.TimeUnit)")
-    );
-
     @Override
     public String getDisplayName() {
-        return "Detect the removed ProcessingTime factory";
+        return "Rewrite the removed ProcessingTime factory to Trigger.ProcessingTime";
     }
 
     @Override
     public String getDescription() {
-        return "org.apache.spark.sql.streaming.ProcessingTime is removed in Spark 3.x; use Trigger.ProcessingTime(...) instead.";
+        return "org.apache.spark.sql.streaming.ProcessingTime is removed in Spark 3.x; " +
+                "Trigger.ProcessingTime(...) is the exact, semantics-preserving replacement " +
+                "(same argument shape).";
     }
 
     @Override
-    public TreeVisitor<?, ExecutionContext> getVisitor() {
-        return new JavaIsoVisitor<ExecutionContext>() {
-            @Override
-            public J.MethodInvocation visitMethodInvocation(J.MethodInvocation method, ExecutionContext ctx) {
-                J.MethodInvocation m = super.visitMethodInvocation(method, ctx);
-                for (MethodMatcher matcher : MATCHERS) {
-                    if (matcher.matches(m)) {
-                        return SearchResult.found(
-                                m,
-                                "ProcessingTime is removed in Spark 3.x; use Trigger.ProcessingTime(...) instead " +
-                                        "(same argument shape)."
-                        );
-                    }
-                }
-                return m;
-            }
-        };
+    public List<Recipe> getRecipeList() {
+        return Arrays.asList(
+                new ChangeMethodTargetToStatic(
+                        "org.apache.spark.sql.streaming.ProcessingTime apply(long)",
+                        "org.apache.spark.sql.streaming.Trigger",
+                        "org.apache.spark.sql.streaming.Trigger",
+                        false
+                ),
+                new ChangeMethodName(
+                        "org.apache.spark.sql.streaming.Trigger apply(long)",
+                        "ProcessingTime",
+                        false,
+                        false
+                ),
+                new ChangeMethodTargetToStatic(
+                        "org.apache.spark.sql.streaming.ProcessingTime create(long, java.util.concurrent.TimeUnit)",
+                        "org.apache.spark.sql.streaming.Trigger",
+                        "org.apache.spark.sql.streaming.Trigger",
+                        false
+                ),
+                new ChangeMethodName(
+                        "org.apache.spark.sql.streaming.Trigger create(long, java.util.concurrent.TimeUnit)",
+                        "ProcessingTime",
+                        false,
+                        false
+                )
+        );
     }
 }
