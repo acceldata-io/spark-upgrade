@@ -16,3 +16,6 @@ dependencies = ["libcst>=1.0.1"]
 
 [tool.setuptools]
 packages = ["spark_upgrade_rules"]
+
+[tool.setuptools.package-data]
+spark_upgrade_rules = ["data/*.txt"]
