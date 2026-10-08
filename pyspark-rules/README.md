@@ -22,7 +22,7 @@ Java recipes, and this package the Python rules. Tier, description and doc link 
 | `pyspark_guide_rules.py` | `ArrayTypeSchemaInference`, `NamedtupleCloudpickle` — the PySpark guide's own 3.3 → 3.4 core changes, no Scala rule to port |
 | `pandas_on_spark_rules.py` | Six 3.3 → 3.4 pandas API on Spark rules (`PandasOnSpark*`), run only in a repo that uses pandas-on-Spark or Koalas, and each asking whether the frame came from `ps`/`ks` or plain pandas |
 | `_cst.py` | Shared helpers: literals, one-hop name resolution, argument lookup, the reader chain's options |
-| `sql.py` | `extract_sql(module)` — every `.sql(...)` call site, classified as literal, interpolated or dynamic, with the text of each literal. Not a rule: plumbing that hands embedded SQL to the JVM side, which lints it with the same 13 Family K codes the Scala and Java paths use |
+| `sql.py` | `extract_sql(module)` — every `.sql(...)` call site, classified as literal, interpolated or dynamic, with the text of each literal; then every SQL statement *defined* in the file — a constant, registry entry, template or f-string whose text is a statement, placeholders filled — that is not already a call site's literal. Not a rule: plumbing that hands embedded SQL to the JVM side, which lints it with the same 13 Family K codes the Scala and Java paths use. `sql_definitions(module)` is the same search, as nodes, for detectors |
 
 The detectors are the Scala rules a PySpark job can hit, ported with the Scala rule's id. Each
 one's claim was run against a real PySpark 3.5.5 session first, and several match a narrower
@@ -35,6 +35,8 @@ shape than their Scala rule because of it — `spark-migrate-cli/PYSPARK.md` §2
   to `DETECTORS`. The message is what the report shows for that call site, so say what this call
   does on 3.x and what to do. Use `self.function(call, "to_date")` for `pyspark.sql.functions`
   (qualified names, `import *` included), `self.string(node)` for a literal or a name bound once.
+  A rule that reads SQL text overrides `check_sql(node, sql)`: it is called for every call's SQL
+  arguments (`self.sql_text_args`) and for every statement defined in the file.
 - **A rule that rewrites subclasses PySparkler's `BaseTransformer`** and goes in
   `transformers()`; the bridge diffs its output.
 - **Run the claim on Spark 3.5.5 before writing the matcher**, and add the shape that does *not*
@@ -42,6 +44,10 @@ shape than their Scala rule because of it — `spark-migrate-cli/PYSPARK.md` §2
 - **Ids.** A port of a Scala rule keeps the Scala rule's id verbatim
   (`DateTimeFormatPatternValidator`). A PySpark-only rule gets a descriptive PascalCase id
   (`SparkSessionBuilderConfigIgnored`). Never `PY<from>-<to>-<NNN>` — that space is upstream's.
+- **Give it a landmine** in spark-migrate-cli's `fixtures/pyspark-rule-coverage-spark2`: a
+  `# SPARK2-PATTERN [YourRuleId]` comment over the line it must fire on, and a
+  `# Contrast [YourRuleId]` over one it must not. `PySparkRuleCoverageE2ESpec` fails for a
+  registered rule without one.
 - **Register it** in `spark-migrate-cli` — a port in `PySparkPortedRules` (the Scala tier), a
   PySpark-only rule in `PyRuleRegistry` (Tier 3) — with a fixture landmine and a must-not-fire
   contrast. An unregistered id is built but never run.
