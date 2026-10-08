@@ -15,26 +15,133 @@ call sites a person has to read.
 
 The matcher is the same `.sql(...)` attribute-call shape PySparkler's own
 PY21-33-001 uses: `spark.sql`, `sqlContext.sql`, `self.spark.sql` alike.
+
+A call site sees only the SQL written into it. Real SQL-heavy code mostly
+keeps its statements elsewhere -- a queries module whose constants another
+file runs, a dict of named queries, a DDL list run in a loop, a `.format` or
+`string.Template` template, an f-string -- and every one of those reaches the
+call as a name, a subscript or a call: dynamic. So SQL is also found where it
+is *defined*:
+
+  defined       a string literal (or implicit concatenation, or f-string)
+                whose text is a SQL statement by its shape, wherever it is
+                written, unless it is already the literal of a call site in
+                the same file. Template placeholders ({x}, {}, %s, %(x)s,
+                $x, ${x}) and f-string expressions become `__param__`, so the
+                rest of the statement is linted.
+
+Docstrings, and strings handed to logging, print or an exception, are never
+SQL. A defined statement sqlfluff cannot parse is not reported -- it may be a
+fragment or prose that happens to start like SQL -- so only rules that fire
+on it produce findings.
 """
 from __future__ import annotations
+
+import re
 
 import libcst as cst
 from libcst.metadata import MetadataWrapper, PositionProvider
 
+from spark_upgrade_rules._cst import Bindings, bindings_of
+from spark_upgrade_rules._cst import string_value as _string_value
+
 LITERAL = "literal"
 INTERPOLATED = "interpolated"
 DYNAMIC = "dynamic"
+DEFINED = "defined"
+
+# A SQL statement by its first words -- strict enough that prose ("select the
+# file from disk" aside) does not qualify: each verb needs its object.
+_STATEMENT = re.compile(
+    r"""^\s*(?:(?:--[^\n]*(?:\n|$)|/\*.*?\*/)\s*)*(?:
+        select\b.+?\bfrom\b
+      | with\s+\w+\s+as\s*\(
+      | insert\s+(?:into|overwrite)\b
+      | create\s+(?:or\s+replace\s+)?(?:global\s+)?(?:temp(?:orary)?\s+)?(?:external\s+)?
+        (?:table|view|database|schema|function)\b
+      | alter\s+(?:table|view|database|schema)\b
+      | drop\s+(?:table|view|database|schema|function)\b
+      | merge\s+into\b
+      | from\s+[\w.`]+(?:\s+\w+)?\s*(?:$|select\b|insert\b)
+      | (?:truncate|analyze|refresh|uncache)\s+table\b
+      | cache\s+(?:lazy\s+)?table\b
+      | msck\s+repair\b
+      | set\s+[\w.]+\s*=
+    )""",
+    re.IGNORECASE | re.DOTALL | re.VERBOSE,
+)
+PARAM = "__param__"
+_PLACEHOLDER = re.compile(r"\{[^{}\s]*\}|%\([A-Za-z_]\w*\)[sd]|%[sd]|(?<![%\d])\$\{?[A-Za-z_]\w*\}?")
+_NOT_SQL_CALLS = {"debug", "info", "warning", "warn", "error", "exception", "critical", "log", "print"}
+_NOT_SQL_KEYWORDS = {"help", "description", "doc", "msg", "message", "epilog", "usage"}
 
 
-def _string_value(node: cst.BaseExpression) -> str | None:
-    """The value of a plain string literal, or None. Bytes and f-strings are not plain."""
-    if isinstance(node, (cst.SimpleString, cst.ConcatenatedString)):
-        try:
-            value = node.evaluated_value
-        except Exception:  # pylint: disable=broad-except
-            return None
-        return value if isinstance(value, str) else None
+def is_statement(text: str) -> bool:
+    return _STATEMENT.match(text) is not None
+
+
+def _template_text(node: cst.BaseExpression) -> str | None:
+    """The text of a string literal, with every placeholder as `__param__`."""
+    if isinstance(node, cst.SimpleString):
+        value = node.evaluated_value
+        return _PLACEHOLDER.sub(PARAM, value) if isinstance(value, str) else None
+    if isinstance(node, cst.ConcatenatedString):
+        left, right = _template_text(node.left), _template_text(node.right)
+        return left + right if left is not None and right is not None else None
+    if isinstance(node, cst.FormattedString):
+        parts = [p.value if isinstance(p, cst.FormattedStringText) else PARAM for p in node.parts]
+        return _PLACEHOLDER.sub(PARAM, "".join(parts))
     return None
+
+
+class _SqlDefinitions(cst.CSTVisitor):
+    """Every SQL-statement string literal not already a call site's literal."""
+
+    def __init__(self, consumed: set[str]) -> None:
+        self.consumed = consumed
+        self.skip: set[int] = set()
+        self.found: list[tuple[cst.BaseExpression, str]] = []
+
+    def visit_Expr(self, node: cst.Expr) -> None:
+        self.skip.add(id(node.value))  # a docstring, or a bare string statement: never run
+
+    def visit_Call(self, node: cst.Call) -> None:
+        name = node.func.attr.value if isinstance(node.func, cst.Attribute) else \
+            node.func.value if isinstance(node.func, cst.Name) else ""
+        if name in _NOT_SQL_CALLS or name.endswith(("Error", "Exception")):
+            self.skip.update(id(a.value) for a in node.args)
+        self.skip.update(id(a.value) for a in node.args if a.keyword is not None and a.keyword.value in _NOT_SQL_KEYWORDS)
+
+    def _string(self, node: cst.BaseExpression) -> bool:
+        if id(node) in self.skip:
+            return False
+        if isinstance(node, cst.ConcatenatedString):  # the whole, not its pieces
+            self.skip.update((id(node.left), id(node.right)))
+        text = _template_text(node)
+        if text is not None and is_statement(text) and _string_value(node) not in self.consumed:
+            self.found.append((node, text))
+        return False
+
+    def visit_SimpleString(self, node: cst.SimpleString) -> bool:
+        return self._string(node)
+
+    def visit_ConcatenatedString(self, node: cst.ConcatenatedString) -> bool:
+        self._string(node)
+        return True
+
+    def visit_FormattedString(self, node: cst.FormattedString) -> bool:
+        return self._string(node)
+
+
+def sql_definitions(module: cst.Module, consumed: set[str] | None = None) -> list[tuple[cst.BaseExpression, str]]:
+    """The defined SQL in `module` (see the module docstring), as (node, text)."""
+    if consumed is None:
+        calls = _SqlCalls(bindings_of(module))
+        MetadataWrapper(module, unsafe_skip_copy=True).visit(calls)
+        consumed = {c["text"] for c in calls.found if c["kind"] == LITERAL}
+    found = _SqlDefinitions(consumed)
+    module.visit(found)
+    return found.found
 
 
 def _is_interpolated(node: cst.BaseExpression) -> bool:
@@ -53,60 +160,10 @@ def _is_interpolated(node: cst.BaseExpression) -> bool:
     return False
 
 
-class _Bindings(cst.CSTVisitor):
-    """Every name bound anywhere in the module, and the string literal it was
-    bound to when that is its only binding. One hop, no flow analysis: a name
-    assigned twice, or ever assigned anything else, is not resolved."""
-
-    def __init__(self) -> None:
-        self.count: dict[str, int] = {}
-        self.literal: dict[str, str] = {}
-
-    def _bind(self, name: str, value: cst.BaseExpression | None) -> None:
-        self.count[name] = self.count.get(name, 0) + 1
-        text = _string_value(value) if value is not None else None
-        if text is not None:
-            self.literal[name] = text
-
-    def visit_Assign(self, node: cst.Assign) -> None:
-        for target in node.targets:
-            if isinstance(target.target, cst.Name):
-                self._bind(target.target.value, node.value if len(node.targets) == 1 else None)
-            else:
-                for name in _names_in(target.target):
-                    self._bind(name, None)
-
-    def visit_AnnAssign(self, node: cst.AnnAssign) -> None:
-        if isinstance(node.target, cst.Name):
-            self._bind(node.target.value, node.value)
-
-    def visit_AugAssign(self, node: cst.AugAssign) -> None:
-        if isinstance(node.target, cst.Name):
-            self._bind(node.target.value, None)
-
-    def visit_For(self, node: cst.For) -> None:
-        for name in _names_in(node.target):
-            self._bind(name, None)
-
-    def visit_Param(self, node: cst.Param) -> None:
-        self._bind(node.name.value, None)
-
-    def resolve(self, name: str) -> str | None:
-        return self.literal.get(name) if self.count.get(name) == 1 else None
-
-
-def _names_in(node: cst.BaseExpression) -> list[str]:
-    if isinstance(node, cst.Name):
-        return [node.value]
-    if isinstance(node, (cst.Tuple, cst.List)):
-        return [n for el in node.elements for n in _names_in(el.value)]
-    return []
-
-
 class _SqlCalls(cst.CSTVisitor):
     METADATA_DEPENDENCIES = (PositionProvider,)
 
-    def __init__(self, bindings: _Bindings) -> None:
+    def __init__(self, bindings: Bindings) -> None:
         self.bindings = bindings
         self.found: list[dict] = []
 
@@ -133,9 +190,13 @@ class _SqlCalls(cst.CSTVisitor):
 def extract_sql(module: cst.Module) -> list[dict]:
     """Every `.sql(...)` call site in `module`, in source order, as
     `{"line": int, "kind": "literal"|"interpolated"|"dynamic", "text": str}`
-    -- `text` only for literals."""
-    bindings = _Bindings()
-    module.visit(bindings)
-    calls = _SqlCalls(bindings)
-    MetadataWrapper(module, unsafe_skip_copy=True).visit(calls)
-    return calls.found
+    -- `text` only for literals -- then every defined statement, as
+    `{"line": int, "kind": "defined", "text": str}`."""
+    wrapper = MetadataWrapper(module, unsafe_skip_copy=True)
+    calls = _SqlCalls(bindings_of(module))
+    wrapper.visit(calls)
+    positions = wrapper.resolve(PositionProvider)
+    consumed = {c["text"] for c in calls.found if c["kind"] == LITERAL}
+    defined = [{"line": positions[node].start.line, "kind": DEFINED, "text": text}
+               for node, text in sql_definitions(module, consumed)]
+    return calls.found + defined
