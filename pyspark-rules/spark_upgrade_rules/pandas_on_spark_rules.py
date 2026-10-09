@@ -22,6 +22,12 @@ from spark_upgrade_rules.detector import Detector
 PS_MODULES = ("pyspark.pandas", "databricks.koalas")
 PS_CONVERTERS = {"pandas_api", "to_pandas_on_spark", "to_koalas"}
 PD_CONVERTERS = {"toPandas", "to_pandas"}
+# Calls that make a plain Spark DataFrame.
+SPARK_SOURCES = {"to_spark", "createDataFrame", "toDF", "table", "sql", "range"}
+# Methods only a Spark DataFrame has (pandas API on Spark spells them
+# differently or not at all): a chain through one is plain Spark.
+SPARK_ONLY = {"select", "selectExpr", "withColumn", "withColumnRenamed", "groupBy", "orderBy", "unionByName",
+              "dropDuplicates", "crossJoin", "repartition", "coalesce"}
 
 
 class _Assignments(cst.CSTVisitor):
@@ -44,7 +50,12 @@ class _Assignments(cst.CSTVisitor):
                 self.stack[-1].setdefault(t.target.value, []).append(node.value)
 
 
-class _PandasOnSparkDetector(Detector):
+class Provenance:
+    """Where a frame came from -- pandas-on-Spark, plain pandas, a Spark
+    DataFrame, or not visible -- one hop through names assigned in the same
+    function or module. Mixed into a Detector or a Fixer (whose
+    `leave_FunctionDef` returns the node, hence the optional argument)."""
+
     def __init__(self, ctx) -> None:
         super().__init__(ctx)
         found = _Assignments()
@@ -56,8 +67,9 @@ class _PandasOnSparkDetector(Detector):
     def visit_FunctionDef(self, node: cst.FunctionDef) -> None:
         self.scope.append(self.by_scope.get(node, {}))
 
-    def leave_FunctionDef(self, original_node: cst.FunctionDef) -> None:
+    def leave_FunctionDef(self, original_node: cst.FunctionDef, updated_node: cst.FunctionDef | None = None):
         self.scope.pop()
+        return updated_node
 
     def _from_module(self, node: cst.BaseExpression) -> str | None:
         for q in self.qualified(node):
@@ -68,12 +80,19 @@ class _PandasOnSparkDetector(Detector):
         return None
 
     def provenance(self, node: cst.BaseExpression | None, depth: int = 0) -> str | None:
-        """"ps", "pd", or None when the frame's origin is not visible."""
+        """"ps", "pd", "spark", or None when the frame's origin is not visible."""
         for n in _cst.spine(node):
             if isinstance(n, cst.Call) and _cst.method_name(n) in PS_CONVERTERS:
                 return "ps"
             if isinstance(n, cst.Call) and _cst.method_name(n) in PD_CONVERTERS:
                 return "pd"
+            if isinstance(n, cst.Call) and _cst.method_name(n) in SPARK_SOURCES and \
+                    self._from_module(_cst.spine_root(n)) is None:  # spark.sql(...), not ps.sql(...)
+                return "spark"
+            if isinstance(n, cst.Attribute) and n.attr.value in ("read", "readStream"):
+                return "spark"
+            if isinstance(n, cst.Call) and _cst.method_name(n) in SPARK_ONLY:
+                return "spark"
         root = _cst.spine_root(node)
         if root is None:
             return None
@@ -93,12 +112,16 @@ class _PandasOnSparkDetector(Detector):
 
     def flag(self, node: cst.CSTNode, frame: cst.BaseExpression | None, message: str) -> None:
         kind = self.provenance(frame)
-        if kind != "pd":
+        if kind not in ("pd", "spark"):
             self.report(node, message, "medium" if kind == "ps" else "low")
 
     @staticmethod
     def groupby_on_spine(node: cst.BaseExpression | None) -> cst.Call | None:
         return next(iter(_cst.spine_calls(node, "groupby")), None)
+
+
+class _PandasOnSparkDetector(Provenance, Detector):
+    pass
 
 
 class PandasOnSparkGroupByHeadTailNegative(_PandasOnSparkDetector):

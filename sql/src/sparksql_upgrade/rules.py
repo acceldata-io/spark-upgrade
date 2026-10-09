@@ -179,7 +179,7 @@ class Rule_NOCHARS_L003(BaseRule):
             return LintResult(
                 anchor=context.segment,
                 description=f"char type found ({type_name}) in {context} see "
-                "https://spark.apache.org/docs/3.0.0/sql-migration-guide.html for migration"
+                "https://archive.apache.org/dist/spark/docs/3.0.0/sql-migration-guide.html for migration"
                 "advice. In Spark 2.4 on non-Hive tables these were treated as strings so "
                 "rewritting to string.",
                 fixes=[LintFix.replace(context.segment, [CodeSegment(raw="string")])],
@@ -231,7 +231,7 @@ class Rule_RESERVEDROPERTIES_L002(BaseRule):
                     anchor=context.segment,
                     description=f"Reserved table/db property {property_name} found in alter "
                     " statement see "
-                    "https://spark.apache.org/docs/3.0.0/sql-migration-guide.html for migration "
+                    "https://archive.apache.org/dist/spark/docs/3.0.0/sql-migration-guide.html for migration "
                     " advice."
                     "In Spark 2.4 these alter statements were (effectively) ignored so you can "
                     " likely delete it, automatically "
@@ -330,7 +330,7 @@ class Rule_RESERVEDROPERTIES_L002(BaseRule):
                 return LintResult(
                     anchor=context.segment,
                     description=f"Reserved table/db property {property_name} found see "
-                    "https://spark.apache.org/docs/3.0.0/sql-migration-guide.html for "
+                    "https://archive.apache.org/dist/spark/docs/3.0.0/sql-migration-guide.html for "
                     "migration advice.",
                     fixes=None,
                 )

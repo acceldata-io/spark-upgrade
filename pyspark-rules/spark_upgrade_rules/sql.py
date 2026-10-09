@@ -73,6 +73,7 @@ _STATEMENT = re.compile(
     re.IGNORECASE | re.DOTALL | re.VERBOSE,
 )
 PARAM = "__param__"
+_FIELD = re.compile(r"\{[A-Za-z_]\w*\}")
 _PLACEHOLDER = re.compile(r"\{[^{}\s]*\}|%\([A-Za-z_]\w*\)[sd]|%[sd]|(?<![%\d])\$\{?[A-Za-z_]\w*\}?")
 _NOT_SQL_CALLS = {"debug", "info", "warning", "warn", "error", "exception", "critical", "log", "print"}
 _NOT_SQL_KEYWORDS = {"help", "description", "doc", "msg", "message", "epilog", "usage"}
@@ -140,7 +141,7 @@ def sql_definitions(module: cst.Module, consumed: set[str] | None = None) -> lis
     if consumed is None:
         calls = _SqlCalls(bindings_of(module))
         MetadataWrapper(module, unsafe_skip_copy=True).visit(calls)
-        consumed = {c["text"] for c in calls.found if c["kind"] == LITERAL}
+        consumed = calls.raw
     found = _SqlDefinitions(consumed)
     module.visit(found)
     return found.found
@@ -168,6 +169,9 @@ class _SqlCalls(cst.CSTVisitor):
     def __init__(self, bindings: Bindings) -> None:
         self.bindings = bindings
         self.found: list[dict] = []
+        # Each literal call site's text as written, before its fields are
+        # filled: what a definition is matched against, so it is not linted twice.
+        self.raw: set[str] = set()
 
     def visit_Call(self, node: cst.Call) -> None:
         if not (isinstance(node.func, cst.Attribute) and node.func.attr.value == "sql"):
@@ -182,6 +186,11 @@ class _SqlCalls(cst.CSTVisitor):
         if text is None and isinstance(arg, cst.Name):
             text = self.bindings.resolve(arg.value)
         if text is not None:
+            # `{name}` is a formatter field -- pyspark.pandas.sql always fills it,
+            # spark.sql since 3.4 when the names are passed -- so it is linted
+            # filled, like a template's placeholder.
+            self.raw.add(text)
+            text = _FIELD.sub(PARAM, text)
             self.found.append({"line": line, "kind": LITERAL, "text": text})
         elif _is_interpolated(arg):
             self.found.append({"line": line, "kind": INTERPOLATED})
@@ -198,7 +207,7 @@ def extract_sql(module: cst.Module) -> list[dict]:
     calls = _SqlCalls(bindings_of(module))
     wrapper.visit(calls)
     positions = wrapper.resolve(PositionProvider)
-    consumed = {c["text"] for c in calls.found if c["kind"] == LITERAL}
+    consumed = calls.raw
     defined = [{"line": positions[node].start.line, "kind": DEFINED, "text": text}
                for node, text in sql_definitions(module, consumed)]
     return calls.found + defined
