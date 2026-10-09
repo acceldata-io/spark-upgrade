@@ -12,12 +12,13 @@ Java recipes, and this package the Python rules. Tier, description and doc link 
 
 | Module | What |
 |---|---|
-| `spark_upgrade_rules/__init__.py` | The contract with the bridge: `transformers()` (rewriting rules, none yet), `detector_ids()` and `detect(module, run_ids)` (the detectors below), `extract_sql(module)` |
-| `detector.py` | `Detector`, the base of a detection-only rule: a LibCST visitor that calls `report(node, message, confidence)` and never edits the tree; and `run`, which runs the chosen ones over one file |
-| `datetime_rules.py` | `DateTimeFormatPatternValidator`, `AddMonthsSnapDetect`, `InvalidTimeZoneIdDetect` — Family D |
+| `spark_upgrade_rules/__init__.py` | The contract with the bridge: `detector_ids()` and `detect(module, run_ids)` (every rule below, for analysis), `fixer_ids()` and `fix(module, fix_ids)` (the rules that rewrite, for codegen), `extract_sql(module)`; `transformers()` is PySparkler-shaped and empty |
+| `detector.py` | `Detector`, the base of a rule that reports: a LibCST visitor that calls `report(node, message, confidence)`. `Fixer`, the base of a rule that also rewrites: a LibCST transformer whose `rewrite(original, new, message)` reports the site as Tier 1, with the change shown, and returns the new node. `run` (analysis: findings only) and `apply` (codegen: the rewrites, chained) |
+| `pyspark_api_rules.py` | `RowKwargsFieldOrder`, `MlSharedParamSetters`, `RemovedPySparkApi` — the 2.4.8 → 3.5.5 PySpark API breaks, from a diff of 2.4.8's public API against a 3.5.5 import; the first two supersede PySparkler's `PY24-30-007`/`-008` with a rewrite |
+| `datetime_rules.py` | `DateTimeFormatPatternValidator`, `AddMonthsSnapDetect`, `InvalidTimeZoneIdDetect` — Family D; `DateTimeStrictParsingDetect`, the strict 3.x parser on a pattern that did not change |
 | `function_rules.py` | `NegativeDecimalScaleDetect`, `DuplicateMapKeyLiteralDetect`, `MapTypeKeyInCreateMapDetect`, `EmptyCollectionTypeDetect`, `HashOnMapTypeDetect`, `SplitEmptyRegexDetect`, `GroupingIdTypeDetect` — Families E, F |
 | `dataframe_rules.py` | `SelfJoinAmbiguousColumnDetect`, `NaFunctionsNameMatchDetect` — Family G |
-| `config_rules.py` | `SetCommandSparkConfDetect` — `spark.conf.set` on a core config, against `data/spark_core_config_keys_3_5_5.txt` |
+| `config_rules.py` | `SetCommandSparkConfDetect` — `spark.conf.set` on a core config, against `data/spark_core_config_keys_3_5_5.txt`; `RemovedSqlConfigDetect` — a 2.4 SQL config 3.5.5 removed or ignores; `CommandOutputSchemaDetect` — `SHOW DATABASES`/`TABLES`, `DESCRIBE DATABASE`'s renamed columns |
 | `datasource_rules.py` | `PathOptionConflictDetect`, `JsonEmptyStringDetect`, `CsvBinaryTypeDetect`, `CsvBomMultilineDetect`, `MultiLineDatasetReadWarn` — Family H |
 | `pyspark_guide_rules.py` | `ArrayTypeSchemaInference`, `NamedtupleCloudpickle` — the PySpark guide's own 3.3 → 3.4 core changes, no Scala rule to port |
 | `pandas_on_spark_rules.py` | Six 3.3 → 3.4 pandas API on Spark rules (`PandasOnSpark*`), run only in a repo that uses pandas-on-Spark or Koalas, and each asking whether the frame came from `ps`/`ks` or plain pandas |
@@ -37,8 +38,12 @@ shape than their Scala rule because of it — `spark-migrate-cli/PYSPARK.md` §2
   (qualified names, `import *` included), `self.string(node)` for a literal or a name bound once.
   A rule that reads SQL text overrides `check_sql(node, sql)`: it is called for every call's SQL
   arguments (`self.sql_text_args`) and for every statement defined in the file.
-- **A rule that rewrites subclasses PySparkler's `BaseTransformer`** and goes in
-  `transformers()`; the bridge diffs its output.
+- **A rule that rewrites is a `Fixer`** (it is still in `DETECTORS`). In `leave_*`, decide on the
+  *original* node; where the rewrite gives exactly 2.4's result, `return self.rewrite(original,
+  new, message)`; elsewhere `self.report(...)` at the rule's own tier and return the node
+  unchanged. Analysis and codegen run the same code, so the report's Tier 1 sites are exactly the
+  ones codegen rewrites. Run the rewrite on Spark 3.5.5 first, and add it to
+  `spark-migrate-cli/scripts/verify-pyspark-ports.py` part 5 (`PYSPARK.md` §2.7).
 - **Run the claim on Spark 3.5.5 before writing the matcher**, and add the shape that does *not*
   fail as a contrast test.
 - **Ids.** A port of a Scala rule keeps the Scala rule's id verbatim
@@ -49,8 +54,9 @@ shape than their Scala rule because of it — `spark-migrate-cli/PYSPARK.md` §2
   `# Contrast [YourRuleId]` over one it must not. `PySparkRuleCoverageE2ESpec` fails for a
   registered rule without one.
 - **Register it** in `spark-migrate-cli` — a port in `PySparkPortedRules` (the Scala tier), a
-  PySpark-only rule in `PyRuleRegistry` (Tier 3) — with a fixture landmine and a must-not-fire
-  contrast. An unregistered id is built but never run.
+  PySpark guide rule in `PySparkGuideRules`, any other in `PySparkCoreRules`; a `Fixer` with
+  `rewrites = true` — with a fixture landmine and a must-not-fire contrast. An unregistered id is
+  built but never run.
 
 See `spark-migrate-cli/PYSPARK.md` §11.3, §11.4 and §11.7.
 
@@ -58,7 +64,7 @@ See `spark-migrate-cli/PYSPARK.md` §11.3, §11.4 and §11.7.
 
 ```bash
 pip install ../pysparkler ./            # or: spark-migrate-cli/scripts/setup-pyspark.sh <venv>
-python -m unittest discover -s tests     # 33 tests: a landmine and a contrast per detector
+python -m unittest discover -s tests     # 52 tests: a landmine and a contrast per rule, and every rewrite
 ```
 
 `data/spark_core_config_keys_3_5_5.txt` is copied in spark-migrate-cli

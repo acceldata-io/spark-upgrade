@@ -277,3 +277,17 @@ def iter_strings(node: cst.CSTNode) -> Iterator[str]:
             yield s
             continue
         stack.extend(n.children)
+
+
+def names_imported(module: cst.Module, from_module: str) -> list[str]:
+    """Names a module-level `from <from_module> import a, b` brings in."""
+    out = []
+    for stmt in module.body:
+        if isinstance(stmt, cst.SimpleStatementLine):
+            for small in stmt.body:
+                if isinstance(small, cst.ImportFrom) and small.module is not None and \
+                        not isinstance(small.names, cst.ImportStar):
+                    from libcst.helpers import get_full_name_for_node
+                    if get_full_name_for_node(small.module) == from_module:
+                        out.extend(get_full_name_for_node(a.name) for a in small.names)
+    return out

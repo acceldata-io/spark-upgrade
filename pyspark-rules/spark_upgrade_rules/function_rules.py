@@ -8,7 +8,7 @@ from __future__ import annotations
 import libcst as cst
 
 from spark_upgrade_rules import _cst
-from spark_upgrade_rules.detector import Detector
+from spark_upgrade_rules.detector import Detector, Fixer
 
 
 def _collection_args(call: cst.Call) -> list[cst.BaseExpression] | None:
@@ -60,8 +60,9 @@ class DuplicateMapKeyLiteralDetect(Detector):
         if dupes:
             shown = ", ".join(f"column {k[1]!r}" if k[0] == "column" else repr(k[2]) for k in dupes)
             self.report(node, f"create_map(...) repeats the key {shown}. Spark 3.0 throws on a duplicate map key "
-                              "(spark.sql.mapKeyDedupPolicy=EXCEPTION) where 2.4 silently kept the last value. Remove the "
-                              "duplicate, or set spark.sql.mapKeyDedupPolicy=LAST_WIN.")
+                              "(spark.sql.mapKeyDedupPolicy=EXCEPTION). In 2.4 the result was undefined -- a lookup returned the "
+                              "first value, collect() kept the last -- so no rewrite reproduces it. Remove the duplicate you do "
+                              "not mean, or set spark.sql.mapKeyDedupPolicy=LAST_WIN.")
 
 
 class MapTypeKeyInCreateMapDetect(Detector):
@@ -96,8 +97,15 @@ _COERCING = {"coalesce", "nvl", "ifnull", "array_union", "array_except", "array_
              "greatest", "least"}
 
 
-class EmptyCollectionTypeDetect(Detector):
+class EmptyCollectionTypeDetect(Fixer):
+    """`array()` / `create_map()` with no elements: NullType elements from 3.0,
+    string in 2.4. Rewritten to `.cast("array<string>")` /
+    `.cast("map<string,string>")` -- exactly 2.4's type, at the call alone,
+    where the legacy config would change every empty collection in the job.
+    Probed on 3.5.5: the cast array writes to Parquet, the bare one does not."""
+
     rule_id = "EmptyCollectionTypeDetect"
+    CASTS = {"array": "array<string>", "create_map": "map<string,string>"}
 
     def __init__(self, ctx) -> None:
         super().__init__(ctx)
@@ -116,12 +124,21 @@ class EmptyCollectionTypeDetect(Detector):
         if _cst.method_name(node) == "otherwise":
             branches = args[:1] + [_cst.argument(w, 1, "value") for w in _cst.spine_calls(_cst.receiver(node), "when")]
             self.coerced.update(id(b) for b in branches if self._empty(b))
-        fn = self.function(node, "array", "create_map")
-        if fn is not None and _collection_args(node) == [] and id(node) not in self.coerced:
-            element = "array<void>" if fn == "array" else "map<void,void>"
-            self.report(node, f"{fn}() with no elements is {element} (NullType) from Spark 3.0, not 2.4's string elements. "
-                              "Cast it to the type you mean (F.array().cast('array<string>')), or set "
-                              "spark.sql.legacy.createEmptyCollectionUsingStringType=true.")
+        # Already cast to a type: `F.array().cast("array<int>")`.
+        if _cst.method_name(node) == "cast" and self._empty(_cst.receiver(node)):
+            self.coerced.add(id(_cst.receiver(node)))
+
+    def leave_Call(self, original_node: cst.Call, updated_node: cst.Call) -> cst.BaseExpression:
+        fn = self.function(original_node, "array", "create_map")
+        if fn is None or _collection_args(original_node) != [] or id(original_node) in self.coerced:
+            return updated_node
+        element = "array<void>" if fn == "array" else "map<void,void>"
+        cast = cst.Call(func=cst.Attribute(value=updated_node, attr=cst.Name("cast")),
+                        args=[cst.Arg(cst.SimpleString(f'"{self.CASTS[fn]}"'))])
+        return self.rewrite(original_node, cast,
+                            f"{fn}() with no elements is {element} (NullType) from Spark 3.0, not 2.4's string elements -- "
+                            "Parquet and ORC cannot write it. Rewritten with the cast to 2.4's type; the alternative, "
+                            "spark.sql.legacy.createEmptyCollectionUsingStringType=true, changes every empty collection in the job.")
 
 
 class HashOnMapTypeDetect(Detector):
