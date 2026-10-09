@@ -42,6 +42,7 @@ from spark_upgrade_rules.function_rules import (
     NegativeDecimalScaleDetect,
     SplitEmptyRegexDetect,
 )
+from spark_upgrade_rules.koalas_rules import KoalasToPandasOnSpark, PandasOnSparkDropAxis, PandasOnSparkSqlFormatter
 from spark_upgrade_rules.pandas_on_spark_rules import (
     PandasOnSparkAstypeCategory,
     PandasOnSparkConcatSort,
@@ -87,6 +88,11 @@ DETECTORS = [
     # rewrites. MlSharedParamSetters adds lines, so it rewrites last.
     RowKwargsFieldOrder,
     RemovedPySparkApi,
+    # Koalas -> pandas API on Spark, then the two changes the port reaches; the
+    # port runs first, so codegen's later rules see pyspark.pandas.
+    KoalasToPandasOnSpark,
+    PandasOnSparkDropAxis,
+    PandasOnSparkSqlFormatter,
     MlSharedParamSetters,
     # The PySpark guide's own 3.3 -> 3.4 changes (PYSPARK.md G14): core...
     ArrayTypeSchemaInference,

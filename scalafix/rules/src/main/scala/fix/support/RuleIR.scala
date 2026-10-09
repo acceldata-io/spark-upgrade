@@ -122,7 +122,7 @@ object RuleRegistry {
       ruleId = "ExecutorPluginWarn",
       tier = 3,
       description = "org.apache.spark.ExecutorPlugin was removed in Spark 3.0 in favor of org.apache.spark.api.plugin.SparkPlugin; a removed API used anywhere is a hard compile break.",
-      docLink = "https://spark.apache.org/docs/3.0.0/core-migration-guide.html",
+      docLink = "https://archive.apache.org/dist/spark/docs/3.0.0/core-migration-guide.html",
       defaultConfidence = "medium"
     ),
     RuleMeta(
@@ -375,7 +375,7 @@ object RuleRegistry {
       ruleId = "IsRunningLocallyWarn",
       tier = 3,
       description = "TaskContext.isRunningLocally() was removed in Spark 3.0 along with local execution, so the code path it guards is dead.",
-      docLink = "https://spark.apache.org/docs/3.0.0/core-migration-guide.html",
+      docLink = "https://archive.apache.org/dist/spark/docs/3.0.0/core-migration-guide.html",
       defaultConfidence = "high"
     ),
     RuleMeta(

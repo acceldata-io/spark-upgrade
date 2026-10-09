@@ -25,6 +25,14 @@ class ExtractSqlTest(unittest.TestCase):
         self.assertEqual(found[1]["text"], "SELECT a\n    FROM t")
         self.assertEqual(found[2]["text"], "SELECT b FROM t")
 
+    def test_formatter_fields_are_linted_filled(self):
+        found = sql_in("""
+            q = ks.sql("SELECT * FROM {kdf} WHERE revenue > {floor}")
+            m = spark.sql("SELECT map('a', 1) AS m")
+        """)
+        self.assertEqual([f["text"] for f in found], ["SELECT * FROM __param__ WHERE revenue > __param__",
+                                                      "SELECT map('a', 1) AS m"])
+
     def test_interpolated_forms(self):
         found = sql_in(
             '''

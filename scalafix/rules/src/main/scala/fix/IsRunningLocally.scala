@@ -34,7 +34,7 @@ class IsRunningLocallyWarn extends SemanticRule("IsRunningLocallyWarn") {
           RuleChange(
             "IsRunningLocallyWarn",
             "TaskContext.isRunningLocally has been removed in Spark 3.0 -- local execution was removed, so this " +
-              "condition can no longer be true. See https://spark.apache.org/docs/3.0.0/core-migration-guide.html",
+              "condition can no longer be true. See https://archive.apache.org/dist/spark/docs/3.0.0/core-migration-guide.html",
             "No auto-rewrite; the branch this guards is dead under Spark 3.x and can most likely be deleted.",
             t
           )

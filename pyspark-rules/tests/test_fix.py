@@ -186,6 +186,102 @@ class ReaderWriterFixTest(unittest.TestCase):
             self.assertIn(expected, out)
 
 
+class KoalasPortTest(unittest.TestCase):
+    def test_imports_and_references(self):
+        code = """
+            import databricks.koalas as ks
+            import databricks.koalas
+            from databricks.koalas.config import set_option
+            from databricks import koalas as kl
+            from databricks.koalas.ml import corr
+            y = databricks.koalas.DataFrame({"a": [1]})
+            kdf = sdf.to_koalas()
+            kdf.koalas.apply_batch(f)
+        """
+        found = analyze(code, "KoalasToPandasOnSpark")
+        self.assertEqual([x[:2] for x in found], [(2, 1), (3, 1), (4, 1), (5, 1), (6, 3), (8, 1), (9, 1)])
+        out = rewritten(code, "KoalasToPandasOnSpark")
+        for expected in ("import pyspark.pandas as ks\n", "import pyspark.pandas\n", "from pyspark.pandas.config import set_option",
+                         "from pyspark import pandas as kl", "from databricks.koalas.ml import corr",
+                         "y = pyspark.pandas.DataFrame(", "kdf = sdf.pandas_api()", "kdf.pandas_on_spark.apply_batch(f)"):
+            self.assertIn(expected, out)
+
+    def test_removed_aliases_only_on_koalas_frames(self):
+        code = """
+            import databricks.koalas as ks
+            def f(sdf, other):
+                kdf = ks.DataFrame({"a": [1]})
+                kdf.cache()
+                kdf.spark_schema()
+                kdf["a"].alias("b")
+                t = kdf["a"].spark_type
+                p = kdf.toPandas()
+                sdf.cache()
+                q = other.toPandas()
+                r = spark.read.parquet("p").cache()
+        """
+        out = rewritten(code, "KoalasToPandasOnSpark")
+        for expected in ("kdf.spark.cache()", "kdf.spark.schema()", 'kdf["a"].rename("b")', 'kdf["a"].spark.data_type',
+                         "p = kdf.to_pandas()", "    sdf.cache()", "q = other.toPandas()", 'spark.read.parquet("p").cache()'):
+            self.assertIn(expected, out)
+
+    def test_no_koalas_no_change(self):
+        code = """
+            x = df.toPandas()
+            y = s.alias("b")
+        """
+        self.assertEqual(analyze(code, "KoalasToPandasOnSpark"), [])
+
+    def test_drop_axis(self):
+        code = """
+            import databricks.koalas as ks
+            import pandas as pd
+            def f(sdf, other):
+                kdf = sdf.to_koalas()
+                a = kdf.drop("c")
+                b = kdf.drop(labels=["c"])
+                ok1 = kdf["x"].drop(0)
+                ok2 = kdf.drop("c", axis=1)
+                ok3 = sdf.select("c").drop("c")
+                ok4 = pd.DataFrame(x).drop("c")
+                ok5 = spark.table("t").drop("c")
+                low = other.drop("c")
+        """
+        self.assertEqual([x[:3] for x in analyze(code, "PandasOnSparkDropAxis")],
+                         [(6, 1, "high"), (7, 1, "high"), (13, 3, "low")])
+        out = rewritten(code, "PandasOnSparkDropAxis")
+        self.assertIn('a = kdf.drop("c", axis=1)', out)
+        self.assertIn('b = kdf.drop(labels=["c"], axis=1)', out)
+
+    def test_sql_formatter(self):
+        code = """
+            import databricks.koalas as ks
+            def q(kdf, floor):
+                a = ks.sql("SELECT a FROM {kdf} WHERE a > {floor}")
+                b = ks.sql("SELECT a FROM {kdf} WHERE a > {floor}", floor=floor)
+                c = ks.sql("SELECT {x[0]}")
+                ok1 = ks.sql("SELECT 1")
+                ok2 = spark.sql("SELECT {x}")
+        """
+        self.assertEqual([x[:2] for x in analyze(code, "PandasOnSparkSqlFormatter")], [(4, 1), (5, 1), (6, 3)])
+        out = rewritten(code, "PandasOnSparkSqlFormatter")
+        self.assertIn('ks.sql("SELECT a FROM {kdf} WHERE a > {floor}", kdf=kdf, floor=floor)', out)
+        self.assertIn('ks.sql("SELECT a FROM {kdf} WHERE a > {floor}", floor=floor, kdf=kdf)', out)
+
+    def test_the_port_chains(self):
+        code = """
+            import databricks.koalas as ks
+            def top(metrics):
+                kdf = metrics.to_koalas()
+                kdf = kdf.drop("returning")
+                return ks.sql("SELECT * FROM {kdf}")
+        """
+        out = rewritten(code)
+        for expected in ("import pyspark.pandas as ks", "metrics.pandas_api()", 'kdf.drop("returning", axis=1)',
+                         'ks.sql("SELECT * FROM {kdf}", kdf=kdf)'):
+            self.assertIn(expected, out)
+
+
 class NewDetectorsTest(unittest.TestCase):
     def test_strict_parsing(self):
         code = """
