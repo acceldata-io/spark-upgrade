@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "spark-upgrade-rules"
+version = "0.1.0"
+description = "Our own PySpark migration rules for Spark 2.4 -> 3.5, run beside the vendored PySparkler"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+# pysparkler is deliberately not declared: it is the vendored, pinned engine
+# installed from ../pysparkler first (spark-migrate-cli's
+# scripts/setup-pyspark.sh). Declaring it would let pip pull PyPI's older
+# release in its place.
+dependencies = ["libcst>=1.0.1"]
+
+[tool.setuptools]
+packages = ["spark_upgrade_rules"]
+
+[tool.setuptools.package-data]
+spark_upgrade_rules = ["data/*.txt"]
