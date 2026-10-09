@@ -10,7 +10,14 @@ the week-based year") collapses to the rule's generic description, and a match
 inside a multi-line statement lands on the statement's last line, not the
 call. A rule that rewrites code is a transformer; a rule that reports is this.
 
-A detector's id is its class attribute `rule_id`, a literal -- spark-migrate-cli's
+A rule that can also rewrite the call site is a `Fixer`: the same helpers on
+a LibCST transformer. Its `leave_*` methods decide on the original node, report
+the site -- Tier 1, with the rewrite shown, where it can rewrite; its fallback
+tier where it cannot -- and return the rewritten node. Analysis runs it and
+keeps only the report (`run`); codegen keeps the tree (`apply`). One predicate
+decides both, so the report never promises a rewrite codegen does not make.
+
+A rule's id is its class attribute `rule_id`, a literal -- spark-migrate-cli's
 PyRuleRegistryDriftSpec reads it from this source.
 """
 from __future__ import annotations
@@ -31,6 +38,7 @@ class Context:
         self.bindings = _cst.bindings_of(module)
         self.star_functions = _StarImports.of(module, _cst.FUNCTIONS)
         self.star_types = _StarImports.of(module, _cst.TYPES)
+        self.star_sql = _StarImports.of(module, "pyspark.sql")
         # SQL statements written as constants, registry entries or templates
         # rather than as a call's literal (sql.py); a rule that reads SQL text
         # checks these too, at the line they are written.
@@ -54,8 +62,9 @@ class _StarImports(cst.CSTVisitor):
                 self.found = True
 
 
-class Detector(cst.CSTVisitor):
-    """Base class. Subclasses set `rule_id` and call `report`."""
+class Rule:
+    """What every rule shares: its id, the per-file context, and the helpers.
+    Mixed into a LibCST visitor (`Detector`) or transformer (`Fixer`)."""
 
     rule_id = ""
     METADATA_DEPENDENCIES = (PositionProvider, QualifiedNameProvider)
@@ -65,10 +74,17 @@ class Detector(cst.CSTVisitor):
         self.ctx = ctx
         self.found: list[dict] = []
 
-    def report(self, node: cst.CSTNode, message: str, confidence: str | None = None) -> None:
+    def report(self, node: cst.CSTNode, message: str, confidence: str | None = None, tier: int | None = None,
+               fix: str | None = None) -> None:
+        """`tier` overrides the registry's for this site; `fix` is the rewrite
+        codegen makes here, shown in the report."""
         finding = {"rule": self.rule_id, "line": self.get_metadata(PositionProvider, node).start.line, "message": message}
         if confidence:
             finding["confidence"] = confidence
+        if tier is not None:
+            finding["tier"] = tier
+        if fix:
+            finding["fix"] = fix
         self.found.append(finding)
 
     def qualified(self, node: cst.CSTNode) -> set[str]:
@@ -114,6 +130,11 @@ class Detector(cst.CSTVisitor):
             return [text] if text is not None else []
         return []
 
+
+
+class Detector(Rule, cst.CSTVisitor):
+    """A rule that reports. Subclasses set `rule_id` and call `report`."""
+
     def check_sql(self, node: cst.CSTNode, sql: str) -> None:
         """Override to check SQL text; called for every call's SQL arguments and
         for every defined statement."""
@@ -125,6 +146,42 @@ class Detector(cst.CSTVisitor):
     def leave_Module(self, original_node: cst.Module) -> None:
         for node, sql in self.ctx.sql_definitions:
             self.check_sql(node, sql)
+
+
+class Fixer(Rule, cst.CSTTransformer):
+    """A rule that rewrites where it safely can. `rewrite` reports the site as
+    Tier 1 with the change shown and returns the new node; a site it cannot
+    rewrite is `report`ed at the rule's own tier and left as it is."""
+
+    def code(self, node: cst.CSTNode) -> str:
+        return " ".join(self.ctx.module.code_for_node(node).split())
+
+    def rewrite(self, original: cst.CSTNode, new: cst.CSTNode, message: str, confidence: str = "high",
+                anchor: cst.CSTNode | None = None) -> cst.CSTNode:
+        self.report(anchor or original, message, confidence, tier=1, fix=f"{self.code(original)} -> {self.code(new)}")
+        return new
+
+
+def apply(module: cst.Module, rules: list[type], fix_ids: set) -> tuple[cst.Module, list[dict], list[dict]]:
+    """Codegen: every `Fixer` in `fix_ids`, chained in `rules` order, each over
+    the previous one's output. Returns the rewritten module, the Tier 1 sites
+    each rewrote (lines are in the tree that rule saw) and one error record per
+    rule that raised -- whose rewrite is then skipped, not half-applied."""
+    applied, errors = [], []
+    for cls in rules:
+        if cls.rule_id not in fix_ids or not issubclass(cls, Fixer):
+            continue
+        fixer = cls(Context(module))
+        try:
+            rewritten = MetadataWrapper(module, unsafe_skip_copy=True).visit(fixer)
+        except Exception as e:  # pylint: disable=broad-except
+            errors.append({"rule": cls.rule_id, "error": str(e)})
+            continue
+        done = [f for f in fixer.found if f.get("tier") == 1]
+        if done:
+            module = rewritten
+            applied.extend(done)
+    return module, applied, errors
 
 
 def run(module: cst.Module, detectors: list[type], run_ids: set) -> tuple[list[dict], list[dict]]:

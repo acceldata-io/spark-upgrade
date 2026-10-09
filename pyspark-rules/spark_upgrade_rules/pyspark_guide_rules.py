@@ -146,9 +146,6 @@ class NamedtupleCloudpickle(Detector):
     def leave_FunctionDef(self, original_node: cst.FunctionDef) -> None:
         self.depth -= 1
 
-    def visit_ClassDef(self, node: cst.ClassDef) -> None:
-        self.depth += 1
-
     def leave_ClassDef(self, original_node: cst.ClassDef) -> None:
         self.depth -= 1
 
@@ -160,6 +157,14 @@ class NamedtupleCloudpickle(Detector):
         if (name in _SHIPS_WORK and any(self._shipped(a) for a in node.args)) or \
                 name in ("foreach", "foreachPartition") or self.function(node, "udf", "pandas_udf"):
             self.ships = True
+
+    def visit_ClassDef(self, node: cst.ClassDef) -> None:
+        # `class Hit(NamedTuple): ...` is built by collections.namedtuple too,
+        # and was patched the same way in 2.4.
+        if self.first is None and self.depth == 0 and any(
+                "typing.NamedTuple" in self.qualified(b.value) for b in node.bases):
+            self.first = node
+        self.depth += 1
 
     def visit_Decorator(self, node: cst.Decorator) -> None:
         target = node.decorator.func if isinstance(node.decorator, cst.Call) else node.decorator

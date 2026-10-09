@@ -290,7 +290,8 @@ class DataSourceRulesTest(unittest.TestCase):
             ok3 = pd.read_csv(f)
         """
         self.assertEqual(lines(code, "CsvBomMultilineDetect"), [2, 3])
-        self.assertEqual(lines(code, "MultiLineDatasetReadWarn"), [2, 3, 4, 5])
+        # multiLine=False reads line by line: not multi-line at all.
+        self.assertEqual(lines(code, "MultiLineDatasetReadWarn"), [2, 3, 4])
 
 
 class PySparkGuide34Test(unittest.TestCase):

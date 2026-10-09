@@ -66,6 +66,8 @@ _STATEMENT = re.compile(
       | (?:truncate|analyze|refresh|uncache)\s+table\b
       | cache\s+(?:lazy\s+)?table\b
       | msck\s+repair\b
+      | show\s+(?:databases|schemas|tables|table\s+extended)\b
+      | desc(?:ribe)?\s+(?:database|schema)\b
       | set\s+[\w.]+\s*=
     )""",
     re.IGNORECASE | re.DOTALL | re.VERBOSE,

@@ -279,3 +279,45 @@ class InvalidTimeZoneIdDetect(Detector):
         self.report(node, f'Time-zone id "{tz}" ({where}) does not resolve with ZoneId.of(id, ZoneId.SHORT_IDS), which is how '
                           "Spark 3.x reads it. 2.4 silently fell back to GMT; 3.0+ throws -- and any data 2.4 produced here was "
                           "computed in GMT, not the intended zone. Use a region id (America/Los_Angeles) or an offset (+05:30).")
+
+
+class DateTimeStrictParsingDetect(DateTimeFormatPatternValidator):
+    """Parsing with a pattern 3.x reads the same way -- the case
+    `DateTimeFormatPatternValidator` leaves alone -- is still exposed. 2.4's
+    SimpleDateFormat parsed leniently; 3.x's parser is strict, and under the
+    default `spark.sql.legacy.timeParserPolicy=EXCEPTION` a value the old
+    parser would have read throws SparkUpgradeException. Probed on 3.5.5 with
+    `yyyy-MM-dd`: '2020-1-5' (no zero padding), '2020-01-05 10:00:00'
+    (trailing text) and '  2020-01-05' (leading space) all fail the job; under
+    LEGACY each parses as in 2.4, under CORRECTED each is NULL. Whether a job
+    is hit depends on its data, so every parsing call site is one repo-wide
+    decision, at low confidence. Parsing without a pattern (`to_date(c)`, a
+    CSV schema with no dateFormat) is lenient in 3.x too and is not flagged;
+    `unix_timestamp(c)` parses with its default pattern and is."""
+
+    rule_id = "DateTimeStrictParsingDetect"
+
+    def visit_Call(self, node: cst.Call) -> None:
+        fn = self.function(node, *PARSING)
+        if fn is not None:
+            arg = _cst.argument(node, 1, "format")
+            if arg is not None:
+                pattern = self.string(arg)
+                if pattern is None:
+                    self._strict(node, f"{fn}(...) with a pattern that is not a literal")
+                else:
+                    self._check(node, pattern, True, f"{fn}(...)")
+            elif fn == "unix_timestamp" and _cst.argument(node, 0, "timestamp") is not None:
+                self._strict(node, f'{fn}(...), which parses a string with its default "yyyy-MM-dd HH:mm:ss"')
+        self._check_options(node)
+        Detector.visit_Call(self, node)
+
+    def _check(self, node: cst.Call, pattern: str, parsing: bool, where: str) -> None:
+        if parsing and check_pattern(pattern, True) is None:
+            self._strict(node, f'"{pattern}" ({where})')
+
+    def _strict(self, node: cst.CSTNode, what: str) -> None:
+        self.report(node, f"Parses with {what}. Spark 3.x's parser is strict where 2.4's was lenient: a value without zero "
+                          "padding ('2020-1-5' for yyyy-MM-dd), with trailing text ('2020-01-05 10:00') or a leading space "
+                          "throws SparkUpgradeException under the default spark.sql.legacy.timeParserPolicy=EXCEPTION. "
+                          "spark.sql.legacy.timeParserPolicy=LEGACY parses exactly as 2.4 did.", "low")
