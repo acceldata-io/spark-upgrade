@@ -20,6 +20,9 @@ object BadSessionBuilder {
     ctx
   }
 
+  // Not rewritten: the builder would make its own SparkContext and drop conf.
+  def fromConf(conf: SparkConf): SQLContext = new SQLContext(new SparkContext(conf))
+
   // This function is unrelated but early tests had arbLong rewrite for some reason.
   private def getGenerator(
     dataType: DataType, generators: Seq[_] = Seq()): Gen[Any] = {

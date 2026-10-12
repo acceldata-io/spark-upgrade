@@ -139,7 +139,10 @@ class KoalasToPandasOnSpark(Provenance, Fixer):
             return updated_node.with_changes(value=_dotted(PANDAS_ON_SPARK))
         if not self.uses_koalas:
             return updated_node
-        if original_node.attr.value == "koalas" and get_full_name_for_node(original_node.value) != "databricks":
+        # Only on a frame known to be Koalas: `args.koalas` is someone's own
+        # attribute, and on any other frame the old name still works on 3.5.5.
+        if original_node.attr.value == "koalas" and get_full_name_for_node(original_node.value) != "databricks" and \
+                self.provenance(original_node.value) == "ps":
             return self.rewrite(original_node, updated_node.with_changes(attr=cst.Name("pandas_on_spark")),
                                 "The .koalas accessor is .pandas_on_spark in pyspark.pandas (the old name is a deprecated "
                                 "alias on 3.5.5). Rewritten.")
@@ -210,6 +213,21 @@ class PandasOnSparkDropAxis(Provenance, Fixer):
 
     rule_id = "PandasOnSparkDropAxis"
 
+    # Calls that return a whole DataFrame, as opposed to a Series, an Index or
+    # an accessor (`kdf.amount`, `kdf.columns`, `ks.Series(...)`).
+    FRAME_CALLS = {"DataFrame", "from_pandas", "pandas_api", "to_koalas", "sql", "range", "concat", "merge",
+                   "read_csv", "read_parquet", "read_json", "read_table", "read_sql", "read_sql_table",
+                   "read_sql_query", "read_excel", "read_orc", "read_delta", "read_spark_io"}
+
+    def _whole_frame(self, node: cst.BaseExpression, depth: int = 0) -> bool:
+        if isinstance(node, cst.Name):
+            bound = self.ctx.bindings.expression(node.value) if depth < 2 else None
+            return bound is None or self._whole_frame(bound, depth + 1)
+        if isinstance(node, cst.Call):
+            name = _cst.method_name(node) or get_full_name_for_node(node.func) or ""
+            return name.split(".")[-1] in self.FRAME_CALLS
+        return False
+
     def leave_Call(self, original_node: cst.Call, updated_node: cst.Call) -> cst.BaseExpression:
         if _cst.method_name(original_node) != "drop" or _cst.has_star_args(original_node):
             return updated_node
@@ -232,6 +250,10 @@ class PandasOnSparkDropAxis(Provenance, Fixer):
         if kind != "ps":
             self.report(original_node, message + " The frame's origin is not visible here: if it is pandas-on-Spark, add "
                                                  "axis=1.", "low", tier=3)
+            return updated_node
+        if not self._whole_frame(recv):
+            self.report(original_node, message + " The receiver may be a Series or an Index, whose drop takes no axis: "
+                                                 "if it is a DataFrame, add axis=1.", "low", tier=3)
             return updated_node
         last = updated_node.args[-1].with_changes(comma=cst.Comma(whitespace_after=cst.SimpleWhitespace(" ")))
         axis = cst.Arg(keyword=cst.Name("axis"), value=cst.Integer("1"),

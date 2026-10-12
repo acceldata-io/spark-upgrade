@@ -1,4 +1,7 @@
 sqlfluff==2.3.2
+# sqlfluff 2.3.2 breaks on click >= 8.2 (ValueError on disable_progress_bar), which
+# kills `sqlfluff lint`/`fix`. Same pin as upstream and scripts/pyspark-engine.lock.
+click<8.2
 flake8
 pytest
 autopep8

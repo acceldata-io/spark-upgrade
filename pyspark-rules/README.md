@@ -19,15 +19,15 @@ Java recipes, and this package the Python rules. Tier, description and doc link 
 | `function_rules.py` | `NegativeDecimalScaleDetect`, `DuplicateMapKeyLiteralDetect`, `MapTypeKeyInCreateMapDetect`, `EmptyCollectionTypeDetect`, `HashOnMapTypeDetect`, `SplitEmptyRegexDetect`, `GroupingIdTypeDetect` — Families E, F |
 | `dataframe_rules.py` | `SelfJoinAmbiguousColumnDetect`, `NaFunctionsNameMatchDetect` — Family G |
 | `config_rules.py` | `SetCommandSparkConfDetect` — `spark.conf.set` on a core config, against `data/spark_core_config_keys_3_5_5.txt`; `RemovedSqlConfigDetect` — a 2.4 SQL config 3.5.5 removed or ignores; `CommandOutputSchemaDetect` — `SHOW DATABASES`/`TABLES`, `DESCRIBE DATABASE`'s renamed columns |
-| `datasource_rules.py` | `PathOptionConflictDetect`, `JsonEmptyStringDetect`, `CsvBinaryTypeDetect`, `CsvBomMultilineDetect`, `MultiLineDatasetReadWarn` — Family H |
+| `datasource_rules.py` | `PathOptionConflictDetect`, `JsonEmptyStringDetect`, `CsvBinaryTypeDetect`, `CsvBomMultilineDetect`, `MultiLineDatasetReadWarn` — Family H; `PathOptionConflictDetect` rewrites only `load(path)` with one path and the writers, and leaves the `csv`/`json`/`parquet`/`orc`/`text` readers on the config (2.4 read the option's path and the argument there). `StoreAssignmentPolicyDetect` — `insertInto`, or `saveAsTable` in append mode, under 3.0's ANSI store assignment |
 | `pyspark_guide_rules.py` | `ArrayTypeSchemaInference`, `NamedtupleCloudpickle` — the PySpark guide's own 3.3 → 3.4 core changes, no Scala rule to port |
-| `koalas_rules.py` | `KoalasToPandasOnSpark`, `PandasOnSparkDropAxis`, `PandasOnSparkSqlFormatter` — the Koalas → `pyspark.pandas` port and the two 3.2 → 3.3 changes it reaches, all rewriting; from a diff of Koalas 1.8.2's source against a 3.5.5 `pyspark.pandas` import |
+| `koalas_rules.py` | `KoalasToPandasOnSpark`, `PandasOnSparkDropAxis`, `PandasOnSparkSqlFormatter` — the Koalas → `pyspark.pandas` port and the two 3.2 → 3.3 changes it reaches, all rewriting where the receiver is provably a Koalas or pandas-on-Spark frame (`args.koalas` and a Series's `drop(axis=1)` are reported, not rewritten); from a diff of Koalas 1.8.2's source against a 3.5.5 `pyspark.pandas` import |
 | `pandas_on_spark_rules.py` | Six 3.3 → 3.4 pandas API on Spark rules (`PandasOnSpark*`), run only in a repo that uses pandas-on-Spark or Koalas, and each asking whether the frame came from `ps`/`ks` or plain pandas |
 | `_cst.py` | Shared helpers: literals, one-hop name resolution, argument lookup, the reader chain's options |
 | `sql.py` | `extract_sql(module)` — every `.sql(...)` call site, classified as literal, interpolated or dynamic, with the text of each literal; then every SQL statement *defined* in the file — a constant, registry entry, template or f-string whose text is a statement, placeholders filled — that is not already a call site's literal. Not a rule: plumbing that hands embedded SQL to the JVM side, which lints it with the same 13 Family K codes the Scala and Java paths use. `sql_definitions(module)` is the same search, as nodes, for detectors |
 
-The detectors are the Scala rules a PySpark job can hit, ported with the Scala rule's id. Each
-one's claim was run against a real PySpark 3.5.5 session first, and several match a narrower
+There are 36 detectors; 8 of them are `Fixer`s. Most are the Scala rules a PySpark job can hit,
+ported with the Scala rule's id. Each one's claim was run against a real PySpark 3.5.5 session first, and several match a narrower
 shape than their Scala rule because of it — `spark-migrate-cli/PYSPARK.md` §2.5 and §8.12.
 
 ## Writing a rule
@@ -65,7 +65,7 @@ See `spark-migrate-cli/PYSPARK.md` §11.3, §11.4 and §11.7.
 
 ```bash
 pip install ../pysparkler ./            # or: spark-migrate-cli/scripts/setup-pyspark.sh <venv>
-python -m unittest discover -s tests     # 59 tests: a landmine and a contrast per rule, and every rewrite
+python -m unittest discover -s tests     # 64 tests: a landmine and a contrast per rule, and every rewrite
 ```
 
 `data/spark_core_config_keys_3_5_5.txt` is copied in spark-migrate-cli

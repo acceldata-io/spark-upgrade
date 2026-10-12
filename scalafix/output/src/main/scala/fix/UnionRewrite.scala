@@ -16,4 +16,12 @@ object UnionRewrite {
     val res4 = ds1.union(ds2) 
     val res5 = Seq(ds1, ds2).reduce(_ union _) 
   }
+
+  // Not Spark: another library's unionAll keeps duplicates and its union
+  // drops them, so renaming it would change the result.
+  class Query(val rows: Seq[Int]) {
+    def unionAll(o: Query): Query = new Query(rows ++ o.rows)
+    def union(o: Query): Query = new Query((rows ++ o.rows).distinct)
+  }
+  def notSpark(a: Query, b: Query): Query = a.unionAll(b)
 }

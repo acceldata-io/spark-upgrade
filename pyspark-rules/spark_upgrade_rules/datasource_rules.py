@@ -104,7 +104,12 @@ class PathOptionConflictDetect(_ReaderHelpers, Fixer):
                    "pair (\"There is a 'path' or 'paths' option set and load() is called with path parameters\"); 3.0 "
                    "and below let the path argument overwrite the option.")
         given = keyword if keyword is not None else paths[0]
-        single = bool(attrs & WRITERS) or (len(paths) + (keyword is not None) == 1 and self._single_path(given))
+        # Only load(path) and the writers let the argument overwrite the option on
+        # 2.4. A reader's csv/json/parquet/orc/text(p) went through load(paths*),
+        # which read the option's path AND the argument -- dropping the option
+        # would silently read less, so those keep the config.
+        single = bool(attrs & WRITERS) or (
+            name == "load" and len(paths) + (keyword is not None) == 1 and self._single_path(given))
         receiver = self._without_path_option(updated_node.func.value) if single and "paths" not in options else None
         if receiver is None:
             self.report(original_node, message + " Drop one, or set spark.sql.legacy.pathOptionBehavior.enabled=true.")

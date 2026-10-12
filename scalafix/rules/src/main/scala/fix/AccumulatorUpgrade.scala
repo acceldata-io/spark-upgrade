@@ -13,18 +13,19 @@ class AccumulatorUpgrade extends SemanticRule("AccumulatorUpgrade") {
     val utils = new Utils()
     val ruleId = "AccumulatorUpgrade"
 
-    // Not auto-rewritten: no typed accumulator preserves a non-zero initial
-    // value, so the call is commented out (replaced with `null`) rather than
-    // silently miscompiled -- this needs a human to pick an AccumulatorV2.
+    // Not rewritten: no typed accumulator preserves an Int (or a non-zero)
+    // initial value, so a person picks the AccumulatorV2. The code is left as
+    // it is: it still compiles on 2.4, which the next Phase A rule needs, and
+    // the compile gate then names the line on 3.5. Its own id is Tier 3.
+    val manualId = s"$ruleId.ManualMigration"
     def needsManualMigration(e: Tree): Patch =
       RuleFinding.report(
         RuleChange(
-          ruleId,
-          "sc.accumulator is removed in Spark 3.x, and no typed accumulator (longAccumulator/doubleAccumulator) accepts a non-zero/named initial value.",
-          "Commented out the accumulator construction and replaced its use with null; needs manual migration to an AccumulatorV2 with the correct initial value.",
+          manualId,
+          "sc.accumulator / org.apache.spark.Accumulator is removed in Spark 3.x, and this usage (an Int, a non-zero initial value, or a custom type) has no exact typed-accumulator equivalent.",
+          "No auto-rewrite: migrate to longAccumulator/doubleAccumulator/collectionAccumulator or a custom AccumulatorV2 by hand.",
           e
-        ),
-        Seq(Patch.addLeft(e, "/*"), Patch.addRight(e, "*/ null")).asPatch
+        )
       )
 
     def rewriteCall(t: Tree, replacement: String): Patch =
@@ -40,6 +41,13 @@ class AccumulatorUpgrade extends SemanticRule("AccumulatorUpgrade") {
       case Importee.Rename(Name("Accumulator"), _) => true
       case _ => false
     }
+
+    lazy val keepsAccumulatorType: Boolean = doc.tree.collect {
+      case Type.Apply(accumulatorTypeMatch(_), List(Type.Name("Long" | "Double"))) => false
+      case Type.Apply(accumulatorTypeMatch(_), _) => true
+    }.contains(true) || doc.tree.collect {
+      case t @ Type.Name("Accumulator") if accumulatorTypeMatch.matches(t) && !t.parent.exists(_.isInstanceOf[Type.Apply]) => true
+    }.nonEmpty
 
     def matchOnTree(e: Tree): Patch = {
       e match {
@@ -145,28 +153,8 @@ class AccumulatorUpgrade extends SemanticRule("AccumulatorUpgrade") {
         // wouldn't compile) or a bare `Patch.empty` (same problem) -- the
         // same "neutralize to something that at least compiles" approach
         // `needsManualMigration` already uses for the call site itself.
-        case t @ Type.Apply(accumulatorTypeMatch(_), _) =>
-          RuleFinding.report(
-            RuleChange(
-              ruleId,
-              "org.apache.spark.Accumulator is removed in Spark 3.x and this usage has no single typed-accumulator equivalent.",
-              "Replaced with Any as a placeholder; migrate to AccumulatorV2/LongAccumulator/DoubleAccumulator/CollectionAccumulator by hand.",
-              t
-            ),
-            Patch.replaceTree(t, "Any")
-          )
-        // A bare `Accumulator` reference with no type argument at all --
-        // same treatment as above.
-        case t @ accumulatorTypeMatch(_) =>
-          RuleFinding.report(
-            RuleChange(
-              ruleId,
-              "org.apache.spark.Accumulator is removed in Spark 3.x and this usage has no single typed-accumulator equivalent.",
-              "Replaced with Any as a placeholder; migrate to AccumulatorV2/LongAccumulator/DoubleAccumulator/CollectionAccumulator by hand.",
-              t
-            ),
-            Patch.replaceTree(t, "Any")
-          )
+        case t @ Type.Apply(accumulatorTypeMatch(_), _) => needsManualMigration(t)
+        case t @ accumulatorTypeMatch(_) => needsManualMigration(t)
 
         // The import itself is a hard break independent of any call-site or
         // type rewrite above: `import org.apache.spark.Accumulator` fails
@@ -182,7 +170,8 @@ class AccumulatorUpgrade extends SemanticRule("AccumulatorUpgrade") {
         // unrelated `import mylib.Accumulator` got silently deleted, while
         // `import org.apache.spark.Accumulator, other.Thing` was missed
         // entirely.
-        case imp @ Import(importers) if importers.exists(i => isSparkPackage(i.ref) && namesAccumulator(i.importees)) =>
+        // Kept while a usage this rule leaves for a person still names the type.
+        case imp @ Import(importers) if !keepsAccumulatorType && importers.exists(i => isSparkPackage(i.ref) && namesAccumulator(i.importees)) =>
           importers.filter(i => isSparkPackage(i.ref)).flatMap(_.importees).collect {
             case i @ Importee.Name(Name("Accumulator")) =>
               RuleFinding.report(
@@ -196,6 +185,9 @@ class AccumulatorUpgrade extends SemanticRule("AccumulatorUpgrade") {
               )
             case _ => Patch.empty
           }.asPatch
+
+        // An import kept above is not a usage to report.
+        case Import(_) => Patch.empty
 
         case elem @ _ =>
           elem.children match {
