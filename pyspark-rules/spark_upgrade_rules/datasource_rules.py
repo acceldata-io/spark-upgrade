@@ -199,3 +199,44 @@ class MultiLineDatasetReadWarn(_ReaderDetector):
             self.report(node, "Multi-line text read with no lineSep. In 2.4, reading multi-line input with \\r\\n (Windows) "
                               "line ends could leave \\r characters in values; 3.x does not. Set lineSep='\\n' to keep the old "
                               "behaviour -- though for most jobs it was the bug. This rule is fuzzy.", "low")
+
+
+class StoreAssignmentPolicyDetect(Detector):
+    """A write into an existing table's schema: `insertInto`, or `saveAsTable`
+    in append mode. From Spark 3.0 (spark.sql.storeAssignmentPolicy=ANSI) a
+    value that cannot be safely cast to its column's type fails the write at
+    analysis whatever the data, and an overflow fails at run time; 2.4 cast it.
+    Probed on 3.5.5 against 2.4.8: both shapes fail on a string written to an
+    int or date column, and LEGACY gives 2.4.8's rows exactly. saveAsTable in
+    any other mode takes its schema from the DataFrame and never fails. SQL
+    INSERTs are the shared SQL linter's (extract_sql)."""
+
+    rule_id = "StoreAssignmentPolicyDetect"
+
+    def _mode(self, node: cst.Call) -> tuple[bool, cst.BaseExpression | None]:
+        """Whether a mode is given, and its expression: `mode=`/third
+        positional, else the nearest `.mode(...)` on the chain."""
+        own = _cst.argument(node, 2, "mode")
+        if own is not None:
+            return True, own
+        calls = _cst.spine_calls(_cst.receiver(node), "mode")
+        return (True, _cst.argument(calls[0], 0, "saveMode")) if calls else (False, None)
+
+    def visit_Call(self, node: cst.Call) -> None:
+        name = _cst.method_name(node)
+        if name == "insertInto":
+            self.report(node, "insertInto" + _STORE_ASSIGNMENT, "medium")
+        elif name == "saveAsTable":
+            given, mode_node = self._mode(node)
+            mode = self.string(mode_node)
+            if mode is not None and mode.lower() == "append":
+                self.report(node, "saveAsTable in append mode" + _STORE_ASSIGNMENT, "medium")
+            elif given and mode is None and not (isinstance(mode_node, cst.Name) and mode_node.value == "None"):
+                self.report(node, "saveAsTable with a mode that may be append" + _STORE_ASSIGNMENT, "low")
+
+
+_STORE_ASSIGNMENT = (
+    " writes into an existing table's schema. From Spark 3.0 (spark.sql.storeAssignmentPolicy=ANSI) a value that cannot "
+    "be safely cast to its column's type -- string to int or date, boolean to numeric -- fails the write at analysis, and "
+    "a numeric overflow fails at run time; 2.4 cast it (a bad string became null, an overflow wrapped). Cast each value "
+    "to its column's type, or set spark.sql.storeAssignmentPolicy=LEGACY (not allowed for an Iceberg or Delta table).")

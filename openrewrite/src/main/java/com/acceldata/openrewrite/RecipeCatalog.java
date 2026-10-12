@@ -31,6 +31,7 @@ import com.acceldata.openrewrite.spark.SparkSelfJoinAmbiguousDetect;
 import com.acceldata.openrewrite.spark.SparkShuffleWriteMetricsRename;
 import com.acceldata.openrewrite.spark.SparkSqlContextConstructorDetect;
 import com.acceldata.openrewrite.spark.SparkSqlLiteralExtract;
+import com.acceldata.openrewrite.spark.SparkStoreAssignmentPolicyDetect;
 import com.acceldata.openrewrite.spark.SparkUnionAllRename;
 
 import java.util.ArrayList;
@@ -126,6 +127,7 @@ public final class RecipeCatalog {
         byId.put(SparkExecutorPluginDetect.class.getName(), new SparkExecutorPluginDetect());
         byId.put(SparkIsRunningLocallyDetect.class.getName(), new SparkIsRunningLocallyDetect());
         byId.put(SparkJsonEmptyStringDetect.class.getName(), new SparkJsonEmptyStringDetect());
+        byId.put(SparkStoreAssignmentPolicyDetect.class.getName(), new SparkStoreAssignmentPolicyDetect());
         byId.put(SparkCalendarIntervalUsageDetect.class.getName(), new SparkCalendarIntervalUsageDetect());
         byId.put(SparkInvalidTimeZoneIdDetect.class.getName(), new SparkInvalidTimeZoneIdDetect());
         // 2026-09-29 coverage review batch -- all Tier 3, detect-only, per

@@ -271,6 +271,22 @@ class DataSourceRulesTest(unittest.TestCase):
         found = run(code, "JsonEmptyStringDetect")
         self.assertEqual([(f["line"] - 2, f["confidence"]) for f in found], [(2, "high"), (3, "high"), (4, "medium")])
 
+    def test_store_assignment_on_writes_into_a_table_schema(self):
+        code = """
+            df.write.insertInto("billing.usage_daily")
+            df.write.mode("append").insertInto("billing.usage_daily", overwrite=True)
+            df.write.mode("append").saveAsTable("billing.usage")
+            df.write.saveAsTable("billing.usage", mode="append")
+            df.write.format("parquet").mode(write_mode).saveAsTable("billing.usage")
+            ok1 = df.write.saveAsTable("billing.fresh")
+            ok2 = df.write.mode("overwrite").saveAsTable("billing.usage")
+            ok3 = df.write.saveAsTable("billing.usage", "parquet", "overwrite")
+            ok4 = df.write.saveAsTable("billing.usage", mode=None)
+        """
+        found = run(code, "StoreAssignmentPolicyDetect")
+        self.assertEqual([(f["line"] - 2, f["confidence"]) for f in found],
+                         [(2, "medium"), (3, "medium"), (4, "medium"), (5, "medium"), (6, "low")])
+
     def test_csv_binary_schema_one_hop(self):
         code = """
             SCHEMA = StructType([StructField("id", LongType()), StructField("blob", BinaryType())])

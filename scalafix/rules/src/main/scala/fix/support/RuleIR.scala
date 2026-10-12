@@ -407,6 +407,13 @@ object RuleRegistry {
       defaultConfidence = "medium"
     ),
     RuleMeta(
+      ruleId = "StoreAssignmentPolicyDetect",
+      tier = 2,
+      description = "Flags a write into an existing table -- SQL INSERT INTO/OVERWRITE, insertInto, saveAsTable in append mode. From Spark 3.0 (storeAssignmentPolicy=ANSI) an unsafe type conversion, such as string to int or date, fails the write instead of casting, and an overflow fails at run time. Feeds spark.sql.storeAssignmentPolicy.",
+      docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
+      defaultConfidence = "medium"
+    ),
+    RuleMeta(
       ruleId = "CsvBinaryTypeDetect",
       tier = 3,
       description = "Flags a CSV read whose explicit schema declares BinaryType, which Spark 3.4 no longer supports for CSV. No legacy config exists.",
