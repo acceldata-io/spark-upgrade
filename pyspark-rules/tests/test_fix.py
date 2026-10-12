@@ -153,10 +153,11 @@ class ReaderWriterFixTest(unittest.TestCase):
             d = spark.read.option("path", p).csv(paths)
             e = spark.read.option("path", p).load("/a", "/b")
         """
-        self.assertEqual([x[:2] for x in analyze(code, rule)], [(2, 1), (3, 1), (7, 1), (8, None), (9, None)])
+        self.assertEqual([x[:2] for x in analyze(code, rule)], [(2, 1), (3, None), (7, 1), (8, None), (9, None)])
         out = rewritten(code, rule)
         self.assertIn('a = spark.read.format("csv").load("/in")', out)
-        self.assertIn('.options(sep="|")', out)
+        # 2.4's csv(p) read the option's path AND p: dropping the option would read less.
+        self.assertIn('.options(path=p, sep="|")', out)
         self.assertIn("c = df.write.save(q)", out)
         self.assertIn('d = spark.read.option("path", p).csv(paths)', out, "a name that may be a list keeps Tier 2")
 
@@ -178,12 +179,64 @@ class ReaderWriterFixTest(unittest.TestCase):
         code = """
             from pyspark.ml.feature import OneHotEncoderEstimator
             r = Row(b=1, a=2)
-            x = spark.read.option("path", p).csv("/in")
+            x = spark.read.option("path", p).load("/in")
             e = F.array()
         """
         out = rewritten(code)
-        for expected in ("import OneHotEncoder\n", "Row(a=2, b=1)", 'spark.read.csv("/in")', 'F.array().cast("array<string>")'):
+        for expected in ("import OneHotEncoder\n", "Row(a=2, b=1)", 'spark.read.load("/in")', 'F.array().cast("array<string>")'):
             self.assertIn(expected, out)
+
+
+class RowPrecedenceTest(unittest.TestCase):
+    def test_row_star_star_of_an_expression_keeps_its_meaning(self):
+        code = """
+            from pyspark.sql import Row
+            r = Row(**a or b)
+            s = Row(**x if c else {})
+        """
+        out = rewritten(code, "RowKwargsFieldOrder")
+        self.assertIn("Row(**dict(sorted((a or b).items())))", out)
+        self.assertIn("Row(**dict(sorted((x if c else {}).items())))", out)
+
+
+class KoalasReceiverTest(unittest.TestCase):
+    def test_drop_axis_only_on_a_whole_frame(self):
+        code = """
+            import databricks.koalas as ks
+            kdf = ks.read_csv("/in")
+            a = kdf.drop("c")
+            b = kdf.amount.drop(0)
+            c = ks.Series([1, 2]).drop(0)
+            d = kdf.columns.drop("x")
+            e = kdf.index.drop([0])
+        """
+        out = rewritten(code, "PandasOnSparkDropAxis")
+        self.assertIn('a = kdf.drop("c", axis=1)', out)
+        for unchanged in ("kdf.amount.drop(0)", "ks.Series([1, 2]).drop(0)", 'kdf.columns.drop("x")', "kdf.index.drop([0])"):
+            self.assertIn(unchanged, out)
+
+    def test_koalas_accessor_only_on_a_koalas_frame(self):
+        code = """
+            import databricks.koalas as ks
+            kdf = ks.read_csv("/in")
+            a = kdf.koalas.apply_batch(f)
+            b = args.koalas
+        """
+        out = rewritten(code, "KoalasToPandasOnSpark")
+        self.assertIn("kdf.pandas_on_spark.apply_batch(f)", out)
+        self.assertIn("b = args.koalas", out)
+
+
+class EncoderImportTest(unittest.TestCase):
+    def test_estimator_imported_on_its_own_line_beside_the_encoder(self):
+        code = """
+            from pyspark.ml.feature import OneHotEncoder
+            from pyspark.ml.feature import OneHotEncoderEstimator
+            enc = OneHotEncoderEstimator(inputCols=["a"], outputCols=["b"])
+        """
+        out = rewritten(code, "RemovedPySparkApi")
+        self.assertNotIn("import OneHotEncoderEstimator", out)
+        self.assertIn("enc = OneHotEncoder(inputCols", out)
 
 
 class KoalasPortTest(unittest.TestCase):

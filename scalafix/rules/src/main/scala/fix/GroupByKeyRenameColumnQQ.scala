@@ -21,66 +21,36 @@ class GroupByKeyRenameColumnQQ
         Patch.replaceTree(t, replacement)
       )
 
-    def matchOnTerm(t: Term): Patch = {
-      val p = t match {
-        case q""""value"""" => renamed(t, q""""key"""".toString())
-        case q"""'value"""  => renamed(t, q"""'key""".toString())
-        case q"""col("value")""" =>
-          renamed(t, q"""col("key")""".toString())
-        case q"""col("value").as""" =>
-          renamed(t, q"""col("key").as""".toString())
-        case q"""col("value").alias""" =>
-          renamed(t, q"""col("key").alias""".toString())
-        case q"""upper(col("value"))""" =>
-          renamed(t, q"""upper(col("key"))""".toString())
-        case q"""upper(col('value))""" =>
-          renamed(t, q"""upper(col('key))""".toString())
-        case _ if ! t.children.isEmpty =>
-          t.children.map {
-            case e: scala.meta.Term => matchOnTerm(e)
-            case _ => Patch.empty
-          }.asPatch
-        case _ => Patch.empty
-      }
-      p
+    // A column reference to "value": col("value") / column("value"),
+    // 'value, $"value". Never inside lit(...), whose "value" is data.
+    def matchColumnRefs(t: Tree): Patch = t match {
+      case Term.Apply(Term.Name("lit" | "typedLit"), _) => Patch.empty
+      case q"""col("value")""" => renamed(t.asInstanceOf[Term], q"""col("key")""".toString())
+      case q"""column("value")""" => renamed(t.asInstanceOf[Term], q"""column("key")""".toString())
+      case q"""'value""" => renamed(t.asInstanceOf[Term], q"""'key""".toString())
+      case Term.Interpolate(Term.Name("$"), List(Lit.String("value")), Nil) => renamed(t.asInstanceOf[Term], "$\"key\"")
+      case _ => t.children.map(matchColumnRefs).asPatch
     }
 
-    // Previously ANDed a bare `q"""groupByKey"""` name check (matches ANY
-    // identifier named "groupByKey" anywhere in the chain, no symbol
-    // resolution) against a loose "isDataset" check that itself accepted a
-    // bare mention of the `Dataset`/`DataFrame` TYPE NAME anywhere in the
-    // chain (plus a dead, typo'd `DataFame` pattern that could never match).
-    // Together those are satisfied by any unrelated class exposing a
-    // same-named `groupByKey` method somewhere near an unrelated
-    // Dataset/DataFrame type mention -- with isRewrite = true, that silently
-    // rewrites an unrelated "value" literal to "key". `dsGBKmatcher` was
-    // already declared (it's what actually verified real occurrences below)
-    // but was only ever used as one alternative inside the loose OR list
-    // instead of being the deciding check.
-    val dsGBKmatcher = SymbolMatcher.normalized("org.apache.spark.sql.Dataset.groupByKey")
+    // An argument that names the column: a bare "value" given directly to the
+    // method (select("value"), withColumnRenamed("value", ...)), or a column
+    // reference anywhere inside it.
+    def matchArg(t: Term): Patch = t match {
+      case Lit.String("value") => renamed(t, q""""key"""".toString())
+      case _ => matchColumnRefs(t)
+    }
 
-    def isDSGroupByKey(t: Term): Boolean =
-      t.collect { case dsGBKmatcher(_) => true }.nonEmpty
+    // Only the result of groupByKey(...).count() has the renamed key column:
+    // not the groupByKey lambda, not mapGroups(...) output, not other frames.
+    val kvCountMatcher = SymbolMatcher.normalized("org.apache.spark.sql.KeyValueGroupedDataset.count")
 
-    def matchOnTree(t: Tree): Patch = {
-      t match {
-        case _ @Term.Apply(tr, params) if (isDSGroupByKey(tr)) => {
-          val patch = List(
-            params.map(matchOnTerm).asPatch,
-            params.map(matchOnTree).asPatch,
-            tr.children.map(matchOnTree).asPatch
-          ).asPatch
-          patch
-        }
-        case elem @ _ => {
-          elem.children match {
-            case Nil => Patch.empty
-            case _ => {
-              elem.children.map(matchOnTree).asPatch
-            }
-          }
-        }
-      }
+    def isAfterGroupByKeyCount(t: Term): Boolean =
+      t.collect { case kvCountMatcher(_) => true }.nonEmpty
+
+    def matchOnTree(t: Tree): Patch = t match {
+      case Term.Apply(fun @ Term.Select(_, _), params) if isAfterGroupByKeyCount(fun) =>
+        List(params.map(matchArg).asPatch, fun.children.map(matchOnTree).asPatch).asPatch
+      case _ => t.children.map(matchOnTree).asPatch
     }
 
     // Bit of a hack, but limit our blast radius

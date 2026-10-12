@@ -36,6 +36,12 @@ object SparkSQLCallExternal {
 
   val ruleCodes: String = pluginRuleCodes.toSeq.sorted.mkString(",")
 
+  /** The fixers whose rewrite gives exactly 2.4's result (SQL.md SS4). The
+   * others are reported but never applied: SPARKSQLCAST_L001's rewrite is a
+   * no-op, NOCHARS_L003's also rewrites Hive DDL, and RESERVEDROPERTIES_L002's
+   * can produce SQL Spark rejects -- those two are restored by config instead. */
+  val fixCodes: String = Seq("FORMATSTRONEINDEX_L004", "SPARKSQL_L004", "SPARKSQL_L005").mkString(",")
+
   lazy val available: Boolean = probe().isEmpty
 
   /** `None` when Family K can really run; `Some(reason)` otherwise.
@@ -152,8 +158,8 @@ class SparkSQLCallExternal extends SemanticRule("SparkSQLCallExternal") {
     // discard exactly the output this rule needs. `lineStream_!`, not
     // `lazyLines_!`, since this module cross-builds for 2.11/2.12/2.13 and
     // `lazyLines_!` doesn't exist before 2.13.
-    def sqlfluffOutput(args: Seq[String], sqlFile: File): Option[String] =
-      Try(Process(Seq("sqlfluff") ++ args ++ Seq("--dialect", "sparksql", "--rules", ruleCodes, sqlFile.toPath.toString)).lineStream_!.mkString("\n")).toOption
+    def sqlfluffOutput(args: Seq[String], sqlFile: File, codes: String = ruleCodes): Option[String] =
+      Try(Process(Seq("sqlfluff") ++ args ++ Seq("--dialect", "sparksql", "--rules", codes, sqlFile.toPath.toString)).lineStream_!.mkString("\n")).toOption
 
     // `lint` runs FIRST, against the ORIGINAL file, so the codes it collects
     // are the actual violations in the code as written -- then `fix` runs
@@ -171,7 +177,7 @@ class SparkSQLCallExternal extends SemanticRule("SparkSQLCallExternal") {
         case Some(output) => output.linesIterator.collect { case lintLine(code) => code }.toSet
         case None => Set.empty[String]
       }
-      sqlfluffOutput(Seq("fix", "-f"), sqlFile)
+      sqlfluffOutput(Seq("fix", "-f"), sqlFile, SparkSQLCallExternal.fixCodes)
       val fixed = Try(scala.io.Source.fromFile(sqlFile).mkString).toOption
       // We don't care about whitespace-only changes.
       val rewritten = fixed.filter(newSQL => newSQL.filterNot(_.isWhitespace) != original.filterNot(_.isWhitespace))

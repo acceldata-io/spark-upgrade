@@ -103,6 +103,10 @@ class RowKwargsFieldOrder(Fixer):
         if stars:
             if len(args) == 1:
                 d = updated_node.args[0].value
+                # `**a or b` is `**(a or b)`; `.items()` binds tighter, so wrap
+                # anything that is not already an atom.
+                if not isinstance(d, (cst.Name, cst.Attribute, cst.Call, cst.Subscript, cst.Dict)) and not d.lpar:
+                    d = d.with_changes(lpar=[cst.LeftParen()], rpar=[cst.RightParen()])
                 sorted_items = cst.Call(func=cst.Name("dict"), args=[cst.Arg(cst.Call(func=cst.Name("sorted"), args=[
                     cst.Arg(cst.Call(func=cst.Attribute(value=d, attr=cst.Name("items"))))]))])
                 return self.rewrite(original_node, updated_node.with_changes(
@@ -264,6 +268,10 @@ class RemovedPySparkApi(Fixer):
                     renamed.append(alias)
                 elif before.asname is not None or not self.has_encoder:
                     renamed.append(alias.with_changes(name=cst.Name("OneHotEncoder")))
+            if not renamed:  # its own line, and OneHotEncoder is already imported elsewhere
+                self.report(original_node, self._encoder_message(), "high", tier=1,
+                            fix=f"{self.code(original_node)} -> (removed)")
+                return cst.RemoveFromParent()
             renamed[-1] = renamed[-1].with_changes(comma=cst.MaybeSentinel.DEFAULT)
             return self.rewrite(original_node, updated_node.with_changes(names=renamed), self._encoder_message())
         return updated_node

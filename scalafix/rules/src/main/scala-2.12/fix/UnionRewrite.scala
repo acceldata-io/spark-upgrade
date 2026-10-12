@@ -44,12 +44,17 @@ class UnionRewrite(config: UnionRewriteConfig) extends SemanticRule("UnionRewrit
         Patch.replaceTree(nameTree, replacement)
       )
 
+    // Spark's Dataset only: Slick, Quill and others have their own unionAll,
+    // where `union` means something else (it drops duplicates).
+    def isDataset(name: Term.Name): Boolean =
+      name.symbol.owner.value == "org/apache/spark/sql/Dataset#"
+
     def matchOnTree(t: Tree): Patch = {
       t.collect {
         case Term.Apply(
             Term.Select(_, deprecated @ Term.Name(name)),
             _
-            ) if config.deprecatedMethod.contains(name) =>
+            ) if config.deprecatedMethod.contains(name) && isDataset(deprecated) =>
           renamed(deprecated, config.deprecatedMethod(name))
         // `"reduce" == name`, not `"reduce".contains(name)`: the latter asked whether
         // the method name is a SUBSTRING of "reduce", matching `.re(...)`, `.red(...)`,
@@ -66,7 +71,7 @@ class UnionRewrite(config: UnionRewriteConfig) extends SemanticRule("UnionRewrit
                 )
               )
             )
-            ) if "reduce" == name && config.deprecatedMethod.contains(nameAnm) =>
+            ) if "reduce" == name && config.deprecatedMethod.contains(nameAnm) && isDataset(deprecatedAnm) =>
           renamed(deprecatedAnm, config.deprecatedMethod(nameAnm))
       }.asPatch
     }

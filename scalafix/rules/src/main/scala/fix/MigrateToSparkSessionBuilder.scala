@@ -25,12 +25,11 @@ class MigrateToSparkSessionBuilder extends SemanticRule("MigrateToSparkSessionBu
     def matchOnTree(e: Tree): Patch = {
       e match {
         // Rewrite the construction of a SQLContext
-        case ns @ Term.New(Init(initArgs)) =>
-          initArgs match {
-            case (sqlSymbolMatcher(s), _, _) => rewriteToBuilder(ns)
-            case _ => Patch.empty
-          }
-        case ns @ Term.Apply(sqlGetOrCreateMatcher(_), _) => rewriteToBuilder(ns)
+        // Only an existing context (a plain name): the builder then reuses it.
+        // `new SQLContext(new SparkContext(conf))` would lose `conf` -- the
+        // builder makes its own context -- and both forms still run on 3.5.
+        case ns @ Term.New(Init(sqlSymbolMatcher(_), _, List(List(_: Term.Name)))) => rewriteToBuilder(ns)
+        case ns @ Term.Apply(sqlGetOrCreateMatcher(_), List(_: Term.Name)) => rewriteToBuilder(ns)
         case elem @ _ =>
           elem.children match {
             case Nil => Patch.empty

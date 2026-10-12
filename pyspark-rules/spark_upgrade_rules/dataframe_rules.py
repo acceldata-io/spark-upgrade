@@ -155,25 +155,19 @@ class SelfJoinAmbiguousColumnDetect(Detector):
 
 
 class NaFunctionsNameMatchDetect(Detector):
-    """`fillna`/`na.fill` and `replace`/`na.replace` given column names. Since
-    3.2 the names resolve like SQL: a missing column throws AnalysisException
-    (2.4 ignored it), a dotted name needs backticks, a nested one throws.
-    Probed on 3.5.5. Calls with no column names are unaffected and not
-    flagged -- unlike the Scala rule, which flags every call. pandas also has
-    `fillna`/`replace`, so the bare methods need a `subset`."""
+    """`replace`/`na.replace` given column names. Since 3.2 the names resolve
+    like SQL: a column the frame does not have, or a nested field, throws --
+    2.4.8 skipped it silently (probed on both). `fillna`/`na.fill` are not
+    flagged: they resolved names the same way on 2.4.8 already, so a missing
+    name failed there too. A call with no column names is unaffected. pandas
+    also has `replace`, so the bare method needs a `subset`."""
 
     rule_id = "NaFunctionsNameMatchDetect"
 
     def visit_Call(self, node: cst.Call) -> None:
         name = _cst.method_name(node)
         via_na = isinstance(_cst.receiver(node), cst.Attribute) and _cst.receiver(node).attr.value == "na"
-        if name in ("fill", "fillna") and (via_na or name == "fillna"):
-            subset = _cst.argument(node, 1, "subset") if via_na else _cst.keyword(node, "subset") or self._list_arg(node, 1)
-            value = _cst.argument(node, 0, "value")
-            names = self._names(subset) + ([k for k, _ in _cst.dict_items(value)] if via_na else [])
-            if subset is not None or names:
-                self._flag(node, f"{'na.' if via_na else ''}{name}", names)
-        elif name == "replace" and (via_na or _cst.keyword(node, "subset") is not None or self._list_arg(node, 2) is not None):
+        if name == "replace" and (via_na or _cst.keyword(node, "subset") is not None or self._list_arg(node, 2) is not None):
             subset = _cst.argument(node, 2, "subset") if via_na else _cst.keyword(node, "subset") or self._list_arg(node, 2)
             if subset is not None:
                 self._flag(node, f"{'na.' if via_na else ''}replace", self._names(subset))
@@ -197,7 +191,8 @@ class NaFunctionsNameMatchDetect(Detector):
         dotted = [n for n in names if "." in n and not n.startswith("`")]
         if dotted:
             self.report(node, f"{call}(...) names the column {dotted[0]!r}. Since Spark 3.2 column names here resolve like SQL, "
-                              f"so a dot means a nested field: write `{dotted[0]}` in backticks, or the call throws.", "high")
+                              "so a dot means a nested field, which replace cannot reach: it throws, where 2.4 skipped it. "
+                              f"A top-level column whose name has a dot needs backticks: `{dotted[0]}`.", "high")
         else:
             self.report(node, f"{call}(...) is given column names. Since Spark 3.2 they resolve like SQL: a name that is not in "
                               "the frame throws AnalysisException (2.4 skipped it silently), and a nested name throws. No "

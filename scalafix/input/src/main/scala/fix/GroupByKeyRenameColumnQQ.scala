@@ -130,4 +130,13 @@ object GroupByKeyRenameColumnQQ {
 
     val r = res2.select('value, col("count(1)"))
   }
+  def inSource4(spark: SparkSession, kafka: DataFrame, strs: Dataset[String]): Unit = {
+    import spark.implicits._
+    // Not the key column of a groupByKey(...).count() result: left alone.
+    val k = kafka.groupByKey(r => r.getAs[String]("value")).count()
+    val m = strs.groupByKey(identity).mapGroups((key, it) => key).select("value")
+    val t = strs.groupByKey(identity).count().withColumn("tag", lit("value"))
+    val d = strs.groupByKey(identity).count()
+      .select($"value") // assert: GroupByKeyRenameColumnQQ
+  }
 }

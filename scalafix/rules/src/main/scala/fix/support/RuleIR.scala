@@ -28,15 +28,20 @@ object RuleRegistry {
       // the call site (0L/0.0 constructor forms, named or not), the
       // Accumulator[Long]/[Double] type annotation, and the now-invalid
       // `import org.apache.spark.Accumulator` -- and every case it can't
-      // safely resolve (non-zero initial value, Int/other type arg)
-      // neutralizes to compilable placeholder code (comment-out+null /
-      // `Any`) with a finding attached, rather than leaving a broken
-      // reference. That's the same bar UnionRewrite's plain rename meets:
-      // Phase A can apply it unattended without ever leaving the working
-      // copy in a state that fails to compile worse than before.
+      // safely resolve (non-zero initial value, Int/other type arg) is
+      // reported as AccumulatorUpgrade.ManualMigration (Tier 3) and left as
+      // written: it still compiles on 2.4 for the next Phase A rule, and the
+      // compile gate names it on 3.5.
       ruleId = "AccumulatorUpgrade",
       tier = 1,
       description = "SparkContext.accumulator is removed in Spark 3.x; migrate to the typed accumulator API (longAccumulator/doubleAccumulator) or a custom AccumulatorV2.",
+      docLink = "https://spark.apache.org/docs/latest/core-migration-guide.html#upgrading-from-core-24-to-30",
+      defaultConfidence = "high"
+    ),
+    RuleMeta(
+      ruleId = "AccumulatorUpgrade.ManualMigration",
+      tier = 3,
+      description = "sc.accumulator / org.apache.spark.Accumulator is removed in Spark 3.x; an Int, non-zero or custom accumulator has no exact typed equivalent and is left for a person.",
       docLink = "https://spark.apache.org/docs/latest/core-migration-guide.html#upgrading-from-core-24-to-30",
       defaultConfidence = "high"
     ),
@@ -184,7 +189,7 @@ object RuleRegistry {
     RuleMeta(
       ruleId = "SparkSQLCallExternal",
       tier = 1,
-      description = "Runs the sqlfluff sparksql-upgrade plugin's Family K rule set (13 rules -- CAST, reserved properties, CHAR, format_string, EXTRACT SECOND, percentile_approx, GLOBAL TEMP VIEW, histogram_numeric, lpad/rpad, to_binary/unbase64, CTE precedence, PARTITION literals, TRANSFORM) against a literal SQL string passed to spark.sql(...)/sqlContext.sql(...): auto-rewrites the 6 fix-compatible codes (lint runs against the original SQL first, so the specific code is captured before any rewrite), reports the other 7 detect-only codes as findings. Requires sqlfluff + the plugin on PATH; falls back to no findings if unavailable or if the process fails.",
+      description = "Runs the sqlfluff sparksql-upgrade plugin's Family K rule set (13 rules -- CAST, reserved properties, CHAR, format_string, EXTRACT SECOND, percentile_approx, GLOBAL TEMP VIEW, histogram_numeric, lpad/rpad, to_binary/unbase64, CTE precedence, PARTITION literals, TRANSFORM) against a literal SQL string passed to spark.sql(...)/sqlContext.sql(...): auto-rewrites the 3 audited fix codes (FORMATSTRONEINDEX_L004, SPARKSQL_L004, SPARKSQL_L005; lint runs against the original SQL first, so the specific code is captured before any rewrite), reports the others as findings. Requires sqlfluff + the plugin on PATH; falls back to no findings if unavailable or if the process fails.",
       docLink = "https://docs.sqlfluff.com/en/stable/dialects.html",
       defaultConfidence = "high"
     ),
@@ -312,9 +317,9 @@ object RuleRegistry {
     RuleMeta(
       ruleId = "NaFunctionsNameMatchDetect",
       tier = 3,
-      description = "Flags na.replace(...)/na.fill(...) call sites -- Spark 3.2 changed DataFrameNaFunctions' column name-matching semantics.",
+      description = "Flags na.replace(...) given column names: since Spark 3.2 a column the frame does not have, or a nested field, throws, where 2.4 skipped it. na.fill is unaffected (probed on 2.4.8 and 3.5.5).",
       docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
-      defaultConfidence = "low"
+      defaultConfidence = "medium"
     ),
     RuleMeta(
       ruleId = "AnalysisExceptionPlanFieldDetect",
@@ -433,22 +438,22 @@ object RuleRegistry {
     // config-injection actually keys on (spark.sql.legacy.ctePrecedencePolicy).
     RuleMeta(
       ruleId = "SparkSQLCallExternal.SPARKSQLCAST_L001",
-      tier = 1,
-      description = "sqlfluff plugin: cast(x as int) on a string that may not parse cleanly is rewritten to int(x). Exact, sqlfluff-verified rewrite.",
+      tier = 3,
+      description = "sqlfluff plugin: cast(x as int) on a string fails under ANSI mode (off by default in 3.5). Detect-only: the plugin's int(x) rewrite is the same expression, so it is not applied.",
       docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
       defaultConfidence = "high"
     ),
     RuleMeta(
       ruleId = "SparkSQLCallExternal.RESERVEDROPERTIES_L002",
-      tier = 1,
-      description = "sqlfluff plugin: a reserved table/database property (provider/location/owner, plus external from 3.2) set via TBLPROPERTIES/DBPROPERTIES is rewritten to the Spark 3.0-safe form. spark.sql.legacy.notReserveProperties remains a fallback for any site the rewrite can't safely reinline.",
+      tier = 2,
+      description = "sqlfluff plugin: a reserved table/database property (provider/location/owner, plus external from 3.2) set via TBLPROPERTIES/DBPROPERTIES. Spark 3.0 rejects it; 2.4 stored it as an ordinary property, which spark.sql.legacy.notReserveProperties restores. Not rewritten: moving it into USING/LOCATION changes the table.",
       docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
       defaultConfidence = "high"
     ),
     RuleMeta(
       ruleId = "SparkSQLCallExternal.NOCHARS_L003",
-      tier = 1,
-      description = "sqlfluff plugin: CHAR is no longer supported outside Hive tables from Spark 3.0 (2.4 silently treated it as STRING); rewritten to STRING.",
+      tier = 2,
+      description = "sqlfluff plugin: a CHAR(n) column. 2.4 made it a STRING; from 3.1 it is a padded CHAR, so equality against a STRING silently stops matching. spark.sql.legacy.charVarcharAsString restores 2.4's STRING. Not rewritten: the plugin's rewrite also changes Hive-format DDL.",
       docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
       defaultConfidence = "high"
     ),

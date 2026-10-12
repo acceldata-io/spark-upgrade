@@ -214,22 +214,23 @@ class DataFrameRulesTest(unittest.TestCase):
         """
         self.assertEqual(run(code, self.rule), [], "ok7: df2 is rebound, so its lineage is not followed")
 
-    def test_na_functions_with_names_only(self):
+    def test_na_replace_with_names_only(self):
+        # Probed: replace skipped a missing or nested name on 2.4.8 and throws on
+        # 3.5.5; fill/fillna failed on a missing name on both, so they are not flagged.
         code = """
-            a = df.na.fill(0, ["total", "count"])
-            b = df.fillna(value=0, subset=cols)
-            c = df.na.fill({"a.b": 0})
             d = df.na.replace(1, 5, "x")
             e = df.replace("a", "b", ["col"])
-            ok1 = df.na.fill("")
-            ok2 = pdf.fillna(method="ffill", axis=0, inplace=True)
-            ok3 = pdf.fillna({"a": 0})
+            f = df.na.replace("x", "y", ["st.p"])
+            ok1 = df.na.fill(0, ["total", "count"])
+            ok2 = df.fillna(value=0, subset=cols)
+            ok3 = df.na.fill({"a.b": 0})
             ok4 = "a.b".replace(".", "_")
             ok5 = s.replace("a", "b", 1)
+            ok6 = df.na.replace(1, 5)
         """
         found = run(code, "NaFunctionsNameMatchDetect")
-        self.assertEqual([f["line"] - 2 for f in found], [2, 3, 4, 5, 6])
-        self.assertIn("`a.b`", found[2]["message"], "a dotted name is told it needs backticks")
+        self.assertEqual([f["line"] - 2 for f in found], [2, 3, 4])
+        self.assertIn("`st.p`", found[2]["message"], "a dotted name is told what it means")
 
 
 class ConfigRuleTest(unittest.TestCase):

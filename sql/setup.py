@@ -20,7 +20,7 @@ setup(
     include_package_data=True,
     package_dir={"": "src"},
     packages=find_packages(where="src"),
-    install_requires="sqlfluff==2.3.2",
+    install_requires=["sqlfluff==2.3.2", "click<8.2"],
     entry_points={
         "sqlfluff": [
             "{plugin_logical_name} = {plugin_root_module}.plugin".format(
