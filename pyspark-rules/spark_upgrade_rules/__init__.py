@@ -26,6 +26,7 @@ from spark_upgrade_rules.datasource_rules import (
     JsonEmptyStringDetect,
     MultiLineDatasetReadWarn,
     PathOptionConflictDetect,
+    StoreAssignmentPolicyDetect,
 )
 from spark_upgrade_rules.datetime_rules import (
     AddMonthsSnapDetect,
@@ -84,6 +85,7 @@ DETECTORS = [
     CsvBinaryTypeDetect,
     CsvBomMultilineDetect,
     MultiLineDatasetReadWarn,
+    StoreAssignmentPolicyDetect,
     # PySpark API: removals between 2.4.8 and 3.5.5, and the Row and ML-setter
     # rewrites. MlSharedParamSetters adds lines, so it rewrites last.
     RowKwargsFieldOrder,
