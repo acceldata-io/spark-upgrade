@@ -14,15 +14,25 @@ class SparkIsRunningLocallyDetectTest implements RewriteTest {
     }
 
     @Test
-    void flagsIsRunningLocally() {
+    void flagsCallsTheRewriteLeaves() {
         rewriteRun(
                 java(
                         """
                         import org.apache.spark.TaskContext;
 
                         class Tasks {
-                            boolean local(TaskContext tc) {
-                                return tc.isRunningLocally();
+                            boolean local() {
+                                return context().isRunningLocally();
+                            }
+
+                            void poll(TaskContext tc) {
+                                while (!tc.isRunningLocally()) {
+                                    tc.attemptNumber();
+                                }
+                            }
+
+                            TaskContext context() {
+                                return TaskContext.get();
                             }
                         }
                         """,
@@ -30,8 +40,18 @@ class SparkIsRunningLocallyDetectTest implements RewriteTest {
                         import org.apache.spark.TaskContext;
 
                         class Tasks {
-                            boolean local(TaskContext tc) {
-                                return /*~~(TaskContext.isRunningLocally() was removed in Spark 3.0 along with local execution; the code path it guards is dead.)~~>*/tc.isRunningLocally();
+                            boolean local() {
+                                return /*~~(TaskContext.isRunningLocally() was removed in Spark 3.0; in 2.4 it always returned false. Replace the call with false (the tool did not, because of its receiver or position).)~~>*/context().isRunningLocally();
+                            }
+
+                            void poll(TaskContext tc) {
+                                while (!/*~~(TaskContext.isRunningLocally() was removed in Spark 3.0; in 2.4 it always returned false. Replace the call with false (the tool did not, because of its receiver or position).)~~>*/tc.isRunningLocally()) {
+                                    tc.attemptNumber();
+                                }
+                            }
+
+                            TaskContext context() {
+                                return TaskContext.get();
                             }
                         }
                         """
@@ -40,13 +60,17 @@ class SparkIsRunningLocallyDetectTest implements RewriteTest {
     }
 
     @Test
-    void leavesOtherTaskContextMethodUntouched() {
+    void leavesCallsTheRewriteCoversAndOtherMethods() {
         rewriteRun(
                 java(
                         """
                         import org.apache.spark.TaskContext;
 
                         class Tasks {
+                            boolean local(TaskContext tc) {
+                                return tc.isRunningLocally() || TaskContext.get().isRunningLocally();
+                            }
+
                             int attempt(TaskContext tc) {
                                 return tc.attemptNumber();
                             }

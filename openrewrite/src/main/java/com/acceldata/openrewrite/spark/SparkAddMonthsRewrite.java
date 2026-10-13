@@ -41,7 +41,7 @@ import java.util.Set;
  *       add_months(d, 1)}. So the call (or the Column expression it is part
  *       of) must be renamed by {@code .as}/{@code .alias}/{@code .name}, be the
  *       value of {@code withColumn}, or be a {@code filter}/{@code where}
- *       condition.</li>
+ *       condition ({@link ColumnNames}).</li>
  * </ul>
  * Every other call is left to {@link SparkAddMonthsUsageWarn}, so each call is
  * reported by exactly one of the two. Neither touches {@code
@@ -71,18 +71,10 @@ public class SparkAddMonthsRewrite extends Recipe {
     private static final List<MethodMatcher> DATE_CONVERSIONS = Arrays.asList(
             new MethodMatcher(FUNCTIONS + " to_date(..)"),
             new MethodMatcher(FUNCTIONS + " to_timestamp(..)"));
-    private static final List<MethodMatcher> RENAMES = Arrays.asList(
-            new MethodMatcher(COLUMN + " as(..)"),
-            new MethodMatcher(COLUMN + " alias(..)"),
-            new MethodMatcher(COLUMN + " name(..)"));
     private static final MethodMatcher LAST_DAY = new MethodMatcher(FUNCTIONS + " last_day(" + COLUMN + ")");
     private static final MethodMatcher WHEN = new MethodMatcher(FUNCTIONS + " when(" + COLUMN + ", java.lang.Object)");
     private static final MethodMatcher EQUAL_TO = new MethodMatcher(COLUMN + " equalTo(java.lang.Object)");
     private static final MethodMatcher OTHERWISE = new MethodMatcher(COLUMN + " otherwise(java.lang.Object)");
-    private static final MethodMatcher WITH_COLUMN = new MethodMatcher(DATASET + " withColumn(java.lang.String, " + COLUMN + ")");
-    private static final List<MethodMatcher> CONDITIONS = Arrays.asList(
-            new MethodMatcher(DATASET + " filter(" + COLUMN + ")"),
-            new MethodMatcher(DATASET + " where(" + COLUMN + ")"));
 
     private static final List<String> ADDED_FUNCTIONS = Arrays.asList("when", "to_date", "last_day");
 
@@ -125,7 +117,7 @@ public class SparkAddMonthsRewrite extends Recipe {
             return false;
         }
         List<Expression> args = addMonths.getArguments();
-        return isRepeatableColumn(args.get(0)) && isRepeatableInt(args.get(1)) && nameIsDiscarded(addMonths, cursor);
+        return isRepeatableColumn(args.get(0)) && isRepeatableInt(args.get(1)) && ColumnNames.isDiscarded(addMonths, cursor);
     }
 
     /**
@@ -182,29 +174,6 @@ public class SparkAddMonthsRewrite extends Recipe {
             e = ((J.Unary) e).getExpression();
         }
         return e instanceof J.Literal || e instanceof J.Identifier;
-    }
-
-    /** Walks up through the Column expression containing the call and checks where it ends up. */
-    private static boolean nameIsDiscarded(J child, Cursor cursor) {
-        Cursor parentCursor = cursor.getParentTreeCursor();
-        Object parent = parentCursor.getValue();
-        if (parent instanceof J.Parentheses) {
-            return nameIsDiscarded((J) parent, parentCursor);
-        }
-        if (!(parent instanceof J.MethodInvocation)) {
-            return false;
-        }
-        J.MethodInvocation p = (J.MethodInvocation) parent;
-        if (matchesAny(RENAMES, p)) {
-            return p.getSelect() != null && p.getSelect().getId().equals(child.getId());
-        }
-        if (WITH_COLUMN.matches(p)) {
-            return p.getArguments().get(1).getId().equals(child.getId());
-        }
-        if (matchesAny(CONDITIONS, p)) {
-            return true;
-        }
-        return TypeUtils.isOfClassType(p.getType(), COLUMN) && nameIsDiscarded(p, parentCursor);
     }
 
     private static boolean matchesAny(List<MethodMatcher> matchers, J.MethodInvocation m) {

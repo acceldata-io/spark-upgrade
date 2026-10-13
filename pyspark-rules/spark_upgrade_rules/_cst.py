@@ -291,3 +291,19 @@ def names_imported(module: cst.Module, from_module: str) -> list[str]:
                     if get_full_name_for_node(small.module) == from_module:
                         out.extend(get_full_name_for_node(a.name) for a in small.names)
     return out
+
+
+def after_leading_imports(body) -> int:
+    """Where a new module-level import goes: after the module's docstring and
+    the run of import statements that opens it, before any other code."""
+    index = 0
+    for i, stmt in enumerate(body):
+        if not isinstance(stmt, cst.SimpleStatementLine):
+            break
+        if all(isinstance(s, (cst.Import, cst.ImportFrom)) for s in stmt.body) or \
+                (i == 0 and len(stmt.body) == 1 and isinstance(stmt.body[0], cst.Expr) and
+                 isinstance(stmt.body[0].value, (cst.SimpleString, cst.ConcatenatedString))):
+            index = i + 1
+        else:
+            break
+    return index

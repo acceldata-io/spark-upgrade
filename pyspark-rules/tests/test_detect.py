@@ -337,7 +337,9 @@ class PySparkGuide34Test(unittest.TestCase):
             ok2 = spark.createDataFrame(rows, schema=SCHEMA)
         """
         found = run(code, "ArrayTypeSchemaInference")
-        self.assertEqual([(f["line"] - 2, f["confidence"]) for f in found], [(2, "low"), (3, "low"), (4, "low")])
+        self.assertEqual([(f["line"] - 2, f["confidence"]) for f in found], [(2, "low"), (3, "low")])
+        # An RDD's first row is not restored by the legacy flag on 3.5.5: its own id.
+        self.assertEqual(lines(code, "ArrayTypeSchemaInference.Rdd"), [4])
 
     def test_array_inference_skips_dataframe_renames(self):
         code = """
@@ -345,9 +347,12 @@ class PySparkGuide34Test(unittest.TestCase):
             b = df.toDF("id", "name")
             c = rdd.toDF()
             d = rdd.toDF(["id", "tags"], 0.5)
+            e = spark.createDataFrame(df.rdd)
+            f = spark.createDataFrame(sc.parallelize(rows))
         """
-        found = run(code, "ArrayTypeSchemaInference")
-        self.assertEqual([(f["line"] - 2, f["confidence"]) for f in found], [(4, "low"), (5, "low")])
+        self.assertEqual(run(code, "ArrayTypeSchemaInference"), [])
+        found = run(code, "ArrayTypeSchemaInference.Rdd")
+        self.assertEqual([(f["line"] - 2, f["confidence"]) for f in found], [(4, "low"), (5, "low"), (6, "low"), (7, "low")])
 
     def test_array_inference_reads_a_name_bound_in_the_function(self):
         code = """

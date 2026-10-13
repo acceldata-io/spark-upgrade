@@ -11,8 +11,8 @@ import libcst.matchers as m
 from spark_upgrade_rules import _cst
 from spark_upgrade_rules.detector import Detector
 
-_FIX = ("Pass an explicit schema, or set spark.sql.pyspark.legacy.inferArrayTypeFromFirstElement.enabled=true "
-        "-- which restores the old rule for every array in the job.")
+_FIX = ("spark.sql.pyspark.legacy.inferArrayTypeFromFirstElement.enabled=true restores the old rule for every array in "
+        "the job, and is injected; on an RDD it does not reach the first row, so pass an explicit schema there.")
 
 
 def _literal_kind(node: cst.BaseExpression) -> str | None:
@@ -74,18 +74,30 @@ class ArrayTypeSchemaInference(Detector):
             return
         if schema is not None and not self._names_only(schema):
             return
+        # 3.5.5 ignores the legacy flag for an RDD's first row, so an RDD call
+        # site is not restored by the config the CLI injects (probed).
+        rdd_id = f"{self.rule_id}.Rdd" if name == "toDF" or self._is_rdd(data) else None
         rows = self._literal_rows(data)
         if rows is None:
             self.report(node, f"{name}(...) infers its schema from Python data this rule cannot see. From Spark 3.4 an "
                               "array's or map's element type is merged across all elements, not taken from the first: "
                               "a mix such as [1, 1.5] now fails to infer, and [{'a': 1}, {'b': 'x'}] becomes "
-                              f"map<string,string> instead of map<string,bigint>. {_FIX}", "low")
+                              f"map<string,string> instead of map<string,bigint>. {_FIX}", "low", rule_id=rdd_id)
             return
         mixed = self._mixed_collection(rows)
         if mixed is not None:
             self.report(node, f"{name}(...) infers its schema from rows containing {mixed}. Spark 3.4 merges element "
                               "types across the whole collection, where 2.4-3.3 used the first element's: this one "
-                              f"now infers differently or fails. {_FIX}", "high")
+                              f"now infers differently or fails. {_FIX}", "high", rule_id=rdd_id)
+
+    _RDD_METHODS = {"parallelize", "map", "flatMap", "filter", "union", "distinct", "repartition", "coalesce",
+                    "mapPartitions", "reduceByKey", "groupByKey", "sortBy", "textFile"}
+
+    def _is_rdd(self, data: cst.BaseExpression | None) -> bool:
+        """Data that is visibly an RDD: `df.rdd`, `sc.parallelize(...)`, `x.map(...)` and the like."""
+        if isinstance(data, cst.Attribute) and data.attr.value == "rdd":
+            return True
+        return isinstance(data, cst.Call) and _cst.method_name(data) in self._RDD_METHODS
 
     def _names_only(self, schema: cst.BaseExpression) -> bool:
         """A list of column names: the types are still inferred."""

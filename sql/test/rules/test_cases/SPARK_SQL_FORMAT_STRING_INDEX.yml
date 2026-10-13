@@ -1,0 +1,34 @@
+rule: FORMATSTRONEINDEX_L004
+
+format_string_aliased:
+  configs:
+    core:
+      dialect: sparksql
+  fail_str: |
+    SELECT format_string('%0$s-%1$s', s) AS f FROM t
+  fix_str: |
+    SELECT format_string('%1$s-%1$s', s) AS f FROM t
+
+format_string_where:
+  configs:
+    core:
+      dialect: sparksql
+  fail_str: |
+    SELECT id FROM t WHERE printf('%0$s', s) = 'a'
+  fix_str: |
+    SELECT id FROM t WHERE printf('%1$s', s) = 'a'
+
+# Unaliased SELECT item: flagged, no fix -- the column name would change.
+format_string_unaliased:
+  configs:
+    core:
+      dialect: sparksql
+  fail_str: |
+    SELECT upper(format_string('%0$s', s)) FROM t
+
+format_string_one_indexed:
+  configs:
+    core:
+      dialect: sparksql
+  pass_str: |
+    SELECT format_string('%1$s', s), format_string(fmt, s) FROM t

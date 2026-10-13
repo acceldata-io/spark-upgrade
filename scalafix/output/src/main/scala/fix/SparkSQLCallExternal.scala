@@ -9,7 +9,11 @@ object OldQuery {
       cast(b as int)
     from fart_tbl""") 
     // An audited fix is rewritten: 2.4 returned the integer second.
-    s.sql("""select int(extract(second from ts)) from t""") 
+    s.sql("""select second(ts) from t""") 
+    // format_string's %0$: rewritten where the column name is discarded (aliased)...
+    s.sql("""select format_string('%1$s', s) as f from t""") 
+    // ...but an unaliased SELECT item would change its name: Tier 3 (.Manual), left as written.
+    s.sql("select format_string('%0$s', s) from t") 
     // We can't auto rewrite this :( easily.
     val q = "SELECT * FROM FARTS LIMIT 1"
     s.sql(q)

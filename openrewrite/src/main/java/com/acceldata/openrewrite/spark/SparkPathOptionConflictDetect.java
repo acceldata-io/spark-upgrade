@@ -29,6 +29,9 @@ import org.openrewrite.marker.SearchResult;
  * unrelated builder of that shape (code review 2026-09-24 SS4.5). This is
  * also what unblocks promoting this recipe off Tier 3 later: a name-only
  * match must never be promoted, a type-checked one safely can be once proven.
+ *
+ * <p>Reports the sites {@link SparkPathOptionConflictRewrite} leaves alone: a
+ * multi-path {@code load}, or a path option whose value may have side effects.
  */
 public class SparkPathOptionConflictDetect extends Recipe {
 
@@ -56,7 +59,8 @@ public class SparkPathOptionConflictDetect extends Recipe {
                 J.MethodInvocation m = super.visitMethodInvocation(method, ctx);
                 String name = m.getSimpleName();
                 boolean isLoadOrSave = LOAD_MATCHER.matches(m) || SAVE_MATCHER.matches(m);
-                if (isLoadOrSave && hasRealArgument(m) && chainHasPathOption(m.getSelect())) {
+                if (isLoadOrSave && hasRealArgument(m) && chainHasPathOption(m.getSelect()) &&
+                        !SparkPathOptionConflictRewrite.isRewritable(m)) {
                     return SearchResult.found(
                             m,
                             "A `path` option and a path argument to ." + name + "(...) coexist on the same chain; " +

@@ -70,6 +70,25 @@ class SparkEmptyCollectionTypeDetectTest implements RewriteTest {
     }
 
     @Test
+    void leavesCallsTheRewriteCoversOrThatAreAlreadyCast() {
+        rewriteRun(
+                java(
+                        """
+                        import org.apache.spark.sql.Dataset;
+                        import org.apache.spark.sql.Row;
+                        import static org.apache.spark.sql.functions.*;
+
+                        class Schemas {
+                            Dataset<Row> defaults(Dataset<Row> df) {
+                                return df.withColumn("tags", array()).select(map().as("attrs"), array().cast("array<int>"));
+                            }
+                        }
+                        """
+                )
+        );
+    }
+
+    @Test
     void leavesArrayWithArgumentsUntouched() {
         rewriteRun(
                 java(

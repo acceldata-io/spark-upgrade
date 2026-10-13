@@ -5,15 +5,47 @@ approx_percent:
     core:
       dialect: sparksql
   fail_str: |
-    SELECT approx_percentile(col, array(0.5, 0.4, 0.1), temp);
+    SELECT approx_percentile(col, array(0.5, 0.4, 0.1), 1.8D) AS p FROM t
   fix_str: |
-    SELECT approx_percentile(col, array(0.5, 0.4, 0.1), cast(temp as int));
+    SELECT approx_percentile(col, array(0.5, 0.4, 0.1), int(1.8D)) AS p FROM t
 
-percent_approx:
+percent_approx_string:
   configs:
     core:
       dialect: sparksql
   fail_str: |
-    SELECT percentile_approx(col, 0.2, temp);
+    SELECT percentile_approx(col, 0.2, '100') p FROM t
   fix_str: |
-    SELECT percentile_approx(col, 0.2, cast(temp as int));
+    SELECT percentile_approx(col, 0.2, int('100')) p FROM t
+
+percent_approx_order_by:
+  configs:
+    core:
+      dialect: sparksql
+  fail_str: |
+    SELECT k FROM t GROUP BY k ORDER BY percentile_approx(col, 0.2, 1000.0)
+  fix_str: |
+    SELECT k FROM t GROUP BY k ORDER BY percentile_approx(col, 0.2, int(1000.0))
+
+# Unaliased SELECT item: flagged, no fix -- the column name would change.
+percent_approx_unaliased:
+  configs:
+    core:
+      dialect: sparksql
+  fail_str: |
+    SELECT percentile_approx(col, 0.2, 1.8) FROM t
+
+# Integral accuracy is unchanged in 3.x; a non-literal one was rejected by 2.4.
+percent_approx_integral:
+  configs:
+    core:
+      dialect: sparksql
+  pass_str: |
+    SELECT percentile_approx(col, 0.2, 100), percentile_approx(col, 0.2, 100L), percentile_approx(col, 0.2) FROM t
+
+percent_approx_already_cast:
+  configs:
+    core:
+      dialect: sparksql
+  pass_str: |
+    SELECT percentile_approx(col, 0.2, cast(1.8 as int)) AS p, percentile_approx(col, 0.2, int(1.8)) AS q FROM t

@@ -263,9 +263,29 @@ class ReaderWriterFixTest(unittest.TestCase):
         """
         self.assertEqual([x[:2] for x in analyze(code, rule)], [(2, 1), (3, 1)])
         out = rewritten(code, rule)
-        self.assertIn('F.array().cast("array<string>")', out)
-        self.assertIn('F.create_map().cast("map<string,string>").alias("m")', out)
+        # Not "array<string>": that cast makes the elements nullable, where 2.4's were not.
+        self.assertIn("from pyspark.sql.types import ArrayType, StringType, MapType\n", out)
+        self.assertIn("F.array().cast(ArrayType(StringType(), False))", out)
+        self.assertIn('F.create_map().cast(MapType(StringType(), StringType(), False)).alias("m")', out)
         self.assertIn('ok2 = F.array().cast("array<int>")', out)
+
+    def test_empty_collection_type_names(self):
+        rule = "EmptyCollectionTypeDetect"
+        joined = rewritten("""
+            from pyspark.sql.types import StructType
+            a = F.array()
+        """, rule)
+        self.assertIn("from pyspark.sql.types import StructType, ArrayType, StringType\n", joined)
+        star = rewritten("""
+            from pyspark.sql.types import *
+            a = F.array()
+        """, rule)
+        self.assertEqual(star.count("import"), 1, "the star import already has them")
+        taken = rewritten("""
+            StringType = str
+            a = F.array()
+        """, rule)
+        self.assertIn('ArrayType(__import__("pyspark.sql.types").sql.types.StringType(), False)', taken)
 
     def test_all_rewrites_chain_in_one_file(self):
         code = """
@@ -275,7 +295,7 @@ class ReaderWriterFixTest(unittest.TestCase):
             e = F.array()
         """
         out = rewritten(code)
-        for expected in ("import OneHotEncoder\n", "Row(a=2, b=1)", 'spark.read.load("/in")', 'F.array().cast("array<string>")'):
+        for expected in ("import OneHotEncoder\n", "Row(a=2, b=1)", 'spark.read.load("/in")', "F.array().cast(ArrayType(StringType(), False))"):
             self.assertIn(expected, out)
 
 
@@ -477,6 +497,110 @@ class NewDetectorsTest(unittest.TestCase):
             out = rdd.map(lambda r: Hit(r[0]))
         """
         self.assertEqual([x[0] for x in analyze(code, "NamedtupleCloudpickle")], [3])
+
+
+class StarImportShadowsTest(unittest.TestCase):
+    """3.5.5's `from pyspark.sql.functions import *` binds 255 names 2.4.8's did
+    not. Probed in docker: the rewritten file prints 2.4.8's output on 3.5.5;
+    the original raises (`reduce() missing ... 'merge'`)."""
+    rule = "StarImportShadowsFilter"
+
+    @staticmethod
+    def run_fix(code: str) -> tuple[str, list[dict]]:
+        module = cst.parse_module(textwrap.dedent(code))
+        out, _, errors = fix(module, {StarImportShadowsTest.rule})
+        assert not errors, errors
+        compile(out, "<rewritten>", "exec")
+        found, errors = detect(module, {StarImportShadowsTest.rule})
+        assert not errors, errors
+        return out, found
+
+    def test_builtin_filter_is_rewritten_with_import(self):
+        out, found = self.run_fix("""
+            \"\"\"Doc.\"\"\"
+            from __future__ import annotations
+            import os
+            from pyspark.sql.functions import *
+            def evens(xs):
+                return list(filter(lambda x: x % 2 == 0, xs))
+            def local(xs, filter):
+                return filter(xs)
+            keep = map(filter, [])
+            df.filter(col("a") > 1)
+            spark.range(3).where(col("id") > 0).rdd.filter(bool)
+        """)
+        self.assertEqual(out.splitlines()[5], "import builtins", "after the opening docstring and imports")
+        self.assertIn("return list(builtins.filter(lambda x", out)
+        self.assertIn("return filter(xs)", out, "a parameter named filter is not the builtin")
+        self.assertIn("keep = map(builtins.filter, [])", out)
+        self.assertIn("df.filter(col", out)
+        self.assertEqual([(f["line"], f["tier"]) for f in found], [(7, 1), (10, 1)])
+
+    def test_no_star_import_no_change(self):
+        out, found = self.run_fix("""
+            from pyspark.sql import functions as F
+            xs = list(filter(None, [0, 1]))
+        """)
+        self.assertNotIn("builtins", out)
+        self.assertEqual(found, [])
+
+    def test_filter_bound_in_module_is_left(self):
+        out, found = self.run_fix("""
+            from pyspark.sql.functions import *
+            def filter(xs):
+                return xs
+            ys = filter([1])
+        """)
+        self.assertNotIn("builtins", out)
+        self.assertEqual(found, [])
+
+    def test_names_imported_before_the_star_are_imported_again(self):
+        out, found = self.run_fix("""
+            import sys
+            from functools import reduce
+            from math import pi, e as euler
+            from typing import cast
+            from pyspark.sql.types import StringType
+            from numpy import median as median
+            from pyspark.sql.functions import *
+            from pyspark.sql.functions import col
+            total = reduce(lambda a, b: a + b, [1, 2]) * pi
+            print(sys.argv, cast(int, 1), StringType(), median([1]), euler)
+        """)
+        lines = out.splitlines()
+        star = lines.index("from pyspark.sql.functions import *")
+        self.assertEqual(lines[star + 1:star + 4],
+                         ["from functools import reduce", "from math import pi", "from numpy import median as median"])
+        self.assertEqual(len(found), 3)
+        self.assertTrue(all(f["tier"] == 1 and f["line"] == 8 for f in found))
+
+    def test_an_unused_import_or_a_later_binding_is_left(self):
+        out, found = self.run_fix("""
+            from functools import reduce
+            from pyspark.sql.functions import *
+            mode = "fast"
+            print(mode)
+        """)
+        self.assertEqual(found, [])
+
+    def test_a_definition_before_the_star_is_reported(self):
+        out, found = self.run_fix("""
+            def reduce(xs):
+                return xs
+            from pyspark.sql.functions import *
+            print(reduce([1]))
+        """)
+        self.assertEqual([(f["line"], f["tier"]) for f in found], [(2, 3)])
+        self.assertEqual(out.count("import"), 1)
+
+    def test_builtins_bound_to_something_else_is_reported(self):
+        out, found = self.run_fix("""
+            from pyspark.sql.functions import *
+            builtins = None
+            ys = filter(None, [1])
+        """)
+        self.assertEqual([(f["line"], f["tier"]) for f in found], [(4, 3)])
+        self.assertIn("ys = filter(None", out)
 
 
 if __name__ == "__main__":

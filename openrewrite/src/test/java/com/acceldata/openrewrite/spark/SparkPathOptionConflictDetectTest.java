@@ -24,7 +24,7 @@ class SparkPathOptionConflictDetectTest implements RewriteTest {
 
                         class Ingest {
                             Dataset<Row> read(SparkSession spark) {
-                                return spark.read().option("path", "/data/in").load("/data/in");
+                                return spark.read().option("path", "/data/in").load("/data/in", "/data/more");
                             }
                         }
                         """,
@@ -35,7 +35,26 @@ class SparkPathOptionConflictDetectTest implements RewriteTest {
 
                         class Ingest {
                             Dataset<Row> read(SparkSession spark) {
-                                return /*~~(A `path` option and a path argument to .load(...) coexist on the same chain; Spark 3.1+ rejects this instead of silently choosing one.)~~>*/spark.read().option("path", "/data/in").load("/data/in");
+                                return /*~~(A `path` option and a path argument to .load(...) coexist on the same chain; Spark 3.1+ rejects this instead of silently choosing one.)~~>*/spark.read().option("path", "/data/in").load("/data/in", "/data/more");
+                            }
+                        }
+                        """
+                )
+        );
+    }
+
+    @Test
+    void leavesSinglePathLoadTheRewriteCovers() {
+        rewriteRun(
+                java(
+                        """
+                        import org.apache.spark.sql.Dataset;
+                        import org.apache.spark.sql.Row;
+                        import org.apache.spark.sql.SparkSession;
+
+                        class Ingest {
+                            Dataset<Row> read(SparkSession spark, String in) {
+                                return spark.read().option("path", in).load("/data/in");
                             }
                         }
                         """

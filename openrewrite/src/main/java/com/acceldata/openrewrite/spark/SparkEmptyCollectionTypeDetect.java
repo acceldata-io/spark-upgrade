@@ -4,7 +4,6 @@ import org.openrewrite.ExecutionContext;
 import org.openrewrite.Recipe;
 import org.openrewrite.TreeVisitor;
 import org.openrewrite.java.JavaIsoVisitor;
-import org.openrewrite.java.MethodMatcher;
 import org.openrewrite.java.tree.J;
 import org.openrewrite.marker.SearchResult;
 
@@ -25,17 +24,13 @@ import org.openrewrite.marker.SearchResult;
  * registration. A zero-argument varargs call parses as a single {@code
  * J.Empty} argument, confirmed against a real spike this session.
  *
- * <p>Detect-only. Feeds {@code spark.sql.legacy.createEmptyCollectionUsingStringType}
- * -- Tier 2 as of 2026-09-25, cross-linked into the existing
- * {@code LegacyConfigRegistry} entry's {@code detectionRuleIds} so Phase B
- * (spark-migrate-cli's {@code PhaseBRunner}) actually injects it.
+ * <p>Reports the calls {@link SparkEmptyCollectionTypeRewrite} does not
+ * rewrite, those whose generated column name survives. Feeds {@code
+ * spark.sql.legacy.createEmptyCollectionUsingStringType} -- Tier 2, cross-linked
+ * into the {@code LegacyConfigRegistry} entry's {@code detectionRuleIds} so
+ * Phase B (spark-migrate-cli's {@code PhaseBRunner}) injects it.
  */
 public class SparkEmptyCollectionTypeDetect extends Recipe {
-
-    private static final MethodMatcher ARRAY_MATCHER =
-            new MethodMatcher("org.apache.spark.sql.functions array(org.apache.spark.sql.Column...)");
-    private static final MethodMatcher MAP_MATCHER =
-            new MethodMatcher("org.apache.spark.sql.functions map(org.apache.spark.sql.Column...)");
 
     @Override
     public String getDisplayName() {
@@ -53,9 +48,10 @@ public class SparkEmptyCollectionTypeDetect extends Recipe {
         return new JavaIsoVisitor<ExecutionContext>() {
             @Override
             public J.MethodInvocation visitMethodInvocation(J.MethodInvocation method, ExecutionContext ctx) {
+                boolean report = SparkEmptyCollectionTypeRewrite.isUntypedEmptyCollection(method, getCursor()) &&
+                        !SparkEmptyCollectionTypeRewrite.isRewritable(method, getCursor());
                 J.MethodInvocation m = super.visitMethodInvocation(method, ctx);
-                boolean isEmptyCall = m.getArguments().size() == 1 && m.getArguments().get(0) instanceof J.Empty;
-                if (isEmptyCall && (ARRAY_MATCHER.matches(m) || MAP_MATCHER.matches(m))) {
+                if (report) {
                     return SearchResult.found(
                             m,
                             m.getSimpleName() + "() called with no arguments infers NullType element(s) " +

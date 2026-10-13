@@ -79,6 +79,7 @@ lazy val input = project.settings(
     "org.apache.spark" %% "spark-core"        % sparkVersion.value,
     "org.apache.spark" %% "spark-sql"         % sparkVersion.value,
     "org.apache.spark" %% "spark-hive"        % sparkVersion.value,
+    "org.apache.spark" %% "spark-mllib"       % sparkVersion.value,
     "org.scalatest" %% "scalatest" % "3.0.0")
 )
 
@@ -98,6 +99,7 @@ lazy val output = project.settings(
     "org.apache.spark" %% "spark-core"        % sparkVersion.value,
     "org.apache.spark" %% "spark-sql"         % sparkVersion.value,
     "org.apache.spark" %% "spark-hive"        % sparkVersion.value,
+    "org.apache.spark" %% "spark-mllib"       % sparkVersion.value,
     "org.scalatest" %% "scalatest" % "3.2.14")
 )
 
