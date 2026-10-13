@@ -17,7 +17,14 @@ final case class RuleMeta(
     tier: Int,
     description: String,
     docLink: String,
-    defaultConfidence: String
+    defaultConfidence: String,
+    // True when the rule's rewrite output does not compile against Spark
+    // 2.4.8 (it names a 3.x-only symbol). Scala Phase A recompiles SemanticDB
+    // against the OLD classpath before every rule, so the CLI runs all
+    // targetOnly rules together in ONE final scalafix invocation, after every
+    // other Tier 1 rule (TRIAGE-PLAN-2026-10-13 §3.1.1). No two targetOnly
+    // rules may rewrite the same span. Only meaningful for tier 1.
+    targetOnly: Boolean = false
 )
 
 object RuleRegistry {
@@ -119,19 +126,42 @@ object RuleRegistry {
       docLink = "https://archive.apache.org/dist/spark/docs/3.0.0/core-migration-guide.html",
       defaultConfidence = "medium"
     ),
+    // Stays Tier 3 (2026-10-13 probe): the rule's rewrite,
+    // getCommonSubexpressions.map(List(_)), is not 2.4's result. For
+    // (a+b)*(a+b) and (a+b)+1, 2.4.8's getAllEquivalentExprs returned every
+    // equivalence class, singletons included, each with all its occurrences
+    // ([(a+b),(a+b),(a+b)], [(a+b)*(a+b)], [(a+b)+1]); the rewrite on 3.5.5
+    // returns only the repeated ones, one occurrence each ([(a+b)]). The 3.x
+    // per-class API (getAllExprStates) is private[sql].
     RuleMeta(
       ruleId = "AllEquivalentExprs",
       tier = 3,
-      description = "EquivalentExpressions.getAllEquivalentExprs was renamed/reshaped to getCommonSubexpressions; rewrites the call site to the new API.",
+      description = "EquivalentExpressions.getAllEquivalentExprs (catalyst internal) was removed in Spark 3.0. getCommonSubexpressions returns only the repeated expressions, one occurrence each, not 2.4's every equivalence class with all its occurrences, so the call site is left for a person.",
       docLink = "https://spark.apache.org/docs/latest/core-migration-guide.html",
       defaultConfidence = "low"
     ),
+    // Tier 1 since 2026-10-13, targetOnly: createSerializer/createDeserializer
+    // do not exist in 2.4.8. Probed on 2.4.8 and 3.5.5: the same row bytes and
+    // decoded values; only 2.4's shared toRow buffer (a row kept without
+    // .copy() was overwritten by the next call) is not reproduced.
     RuleMeta(
       ruleId = "ExpressionEncoder",
+      // Tier 3, not 1: the rewrite is not exact. 2.4's toRow reused one row
+      // buffer per encoder, so a row kept without .copy() was overwritten by
+      // the next call; createSerializer() gives each serializer its own buffer
+      // (probed 2026-10-13). The compile gate names these lines.
       tier = 3,
-      description = "ExpressionEncoder.toRow/fromRow were replaced by createSerializer()/createDeserializer(); rewrites call sites to the new API.",
+      description = "ExpressionEncoder.toRow/fromRow were removed in Spark 3.0: use enc.createSerializer()(x) / enc.createDeserializer()(r). Not rewritten automatically because it is not exact: 2.4's toRow reused one row buffer per encoder, so a row kept without .copy() was overwritten by the next call; with createSerializer() it is not. Check whether the code relied on that.",
       docLink = "https://spark.apache.org/docs/latest/core-migration-guide.html",
-      defaultConfidence = "low"
+      defaultConfidence = "high",
+      targetOnly = true
+    ),
+    RuleMeta(
+      ruleId = "ExpressionEncoder.Manual",
+      tier = 3,
+      description = "ExpressionEncoder.toRow/fromRow were removed in Spark 3.0, and this use (infix or eta-expanded) was not rewritten; call enc.createSerializer()(x) / enc.createDeserializer()(r).",
+      docLink = "https://spark.apache.org/docs/latest/core-migration-guide.html",
+      defaultConfidence = "high"
     ),
     RuleMeta(
       ruleId = "MigrateDeprecatedDataFrameReaderFuns",
@@ -178,7 +208,7 @@ object RuleRegistry {
     RuleMeta(
       ruleId = "SparkSQLCallExternal",
       tier = 1,
-      description = "Runs the sqlfluff sparksql-upgrade plugin's Family K rule set (13 rules -- CAST, reserved properties, CHAR, format_string, EXTRACT SECOND, percentile_approx, GLOBAL TEMP VIEW, histogram_numeric, lpad/rpad, to_binary/unbase64, CTE precedence, PARTITION literals, TRANSFORM) against a literal SQL string passed to spark.sql(...)/sqlContext.sql(...): auto-rewrites the 3 audited fix codes (FORMATSTRONEINDEX_L004, SPARKSQL_L004, SPARKSQL_L005; lint runs against the original SQL first, so the specific code is captured before any rewrite), reports the others as findings. Requires sqlfluff + the plugin on PATH; falls back to no findings if unavailable or if the process fails.",
+      description = "Runs the sqlfluff sparksql-upgrade plugin's Family K rule set (13 rules -- CAST, reserved properties, CHAR, format_string, EXTRACT SECOND, percentile_approx, GLOBAL TEMP VIEW, histogram_numeric, lpad/rpad, to_binary/unbase64, CTE precedence, PARTITION literals, TRANSFORM) against a literal SQL string passed to spark.sql(...)/sqlContext.sql(...): auto-rewrites the 3 audited fix codes (FORMATSTRONEINDEX_L004, SPARKSQL_L004, SPARKSQL_L005) only when the whole literal is fixed (a re-lint shows none of them, no new code, no parse error), otherwise reports them as <code>.Manual (Tier 3); reports the other codes as findings. Requires sqlfluff + the plugin on PATH; falls back to no findings if unavailable or if the process fails.",
       docLink = "https://docs.sqlfluff.com/en/stable/dialects.html",
       defaultConfidence = "high"
     ),
@@ -187,13 +217,23 @@ object RuleRegistry {
     // spark.sql.legacy.* config in LegacyConfigRegistry that its firing
     // makes eligible for Phase B's submit-conf injection. Detection-only --
     // no code rewrite -- by definition of Tier 2 in the tier taxonomy.
-    // Tier 3, never config-injected: probed, udf((x: Int) => x + 1, IntegerType)
+    // Never config-injected: probed, udf((x: Int) => x + 1, IntegerType)
     // on [1, null] gives [2, null] on 2.4.8 but [2, 1] on 3.5.5 with
     // spark.sql.legacy.allowUntypedScalaUDF=true, and that config is job-global.
+    // Tier 1 since 2026-10-13 for a lambda with simple annotated parameters
+    // and a simple DataType: the typed UDF with a boxed result type was probed
+    // equal to 2.4's untyped one (name, type, nullability, values, nulls).
     RuleMeta(
       ruleId = "UntypedScalaUDFDetect",
+      tier = 1,
+      description = "The untyped functions.udf(f, dataType) form throws at udf creation on Spark 3.x. Where f is a lambda whose parameters are all annotated (primitive, boxed, String, java.sql.Date/Timestamp) and dataType is a simple atomic type, it is rewritten to the typed udf[R, A1, ...](f) with R the boxed result type (udf((x: Int) => x + 1, IntegerType) -> udf[java.lang.Integer, Int](...)): the same column name, type, nullability and values as 2.4, null for a null primitive input included.",
+      docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
+      defaultConfidence = "high"
+    ),
+    RuleMeta(
+      ruleId = "UntypedScalaUDFDetect.Manual",
       tier = 3,
-      description = "Flags the untyped functions.udf(AnyRef, DataType) form, which Spark 3.x rejects at udf creation. Rewrite it as a typed UDF (udf((x: Int) => x + 1) / udf[Int, Int](...)); do not set spark.sql.legacy.allowUntypedScalaUDF, which silently turns a null input into 0 for primitive parameters.",
+      description = "The untyped functions.udf(AnyRef, DataType) form throws at udf creation on Spark 3.x, and this call is not a lambda with simple annotated parameters and a simple DataType, so it was not rewritten. Rewrite it as a typed UDF (udf[java.lang.Integer, Int]((x: Int) => x + 1)); do not set spark.sql.legacy.allowUntypedScalaUDF, which silently turns a null input into 0 for primitive parameters.",
       docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
       defaultConfidence = "high"
     ),
@@ -211,10 +251,19 @@ object RuleRegistry {
       docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
       defaultConfidence = "medium"
     ),
+    // Tier 1 since 2026-10-13 for one path argument (probed: 2.4.8 used the
+    // argument); every other shape is the Tier 2 .Config sub-id.
     RuleMeta(
       ruleId = "PathOptionConflictDetect",
+      tier = 1,
+      description = "A `path` option coexisting with one path argument to load()/save(), which Spark 3.1 rejects. 2.4 used the argument and ignored the option, so the literal .option(\"path\", v) / the \"path\" pair of a literal options(Map(...)) is removed.",
+      docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
+      defaultConfidence = "high"
+    ),
+    RuleMeta(
+      ruleId = "PathOptionConflictDetect.Config",
       tier = 2,
-      description = "Flags a `path` option coexisting with a path argument to load()/save(), which Spark 3.1 rejects instead of silently picking one. Feeds spark.sql.legacy.pathOptionBehavior.enabled.",
+      description = "A `path` option coexisting with a path argument to load()/save(), which Spark 3.1 rejects, in a shape the tool does not rewrite (several paths, a path option off the call's own chain, a value with possible side effects). Feeds spark.sql.legacy.pathOptionBehavior.enabled.",
       docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
       defaultConfidence = "high"
     ),
@@ -225,10 +274,19 @@ object RuleRegistry {
       docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
       defaultConfidence = "high"
     ),
+    // Tier 1 since 2026-10-13 where the generated column name is discarded
+    // (probed exact, nullability included); elsewhere the Tier 2 .Config sub-id.
     RuleMeta(
       ruleId = "EmptyCollectionTypeDetect",
+      tier = 1,
+      description = "No-argument array()/map() infer NullType element(s) in Spark 3.0 instead of 2.4's StringType. Rewritten to array().cast(ArrayType(StringType, false)) / map().cast(MapType(StringType, StringType, false)), 2.4's exact type, where the expression's auto-generated column name is discarded (aliased, withColumn's value, or a filter/where/orderBy/sort/join argument), since the cast changes that name.",
+      docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
+      defaultConfidence = "high"
+    ),
+    RuleMeta(
+      ruleId = "EmptyCollectionTypeDetect.Config",
       tier = 2,
-      description = "Flags no-argument array()/map() calls, which infer NullType element(s) in Spark 3.0 instead of 2.4's StringType. Feeds spark.sql.legacy.createEmptyCollectionUsingStringType.",
+      description = "No-argument array()/map() infer NullType element(s) in Spark 3.0 instead of 2.4's StringType, and the result may become a named output column whose auto-generated name a cast would change, so it was not rewritten. Feeds spark.sql.legacy.createEmptyCollectionUsingStringType.",
       docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
       defaultConfidence = "high"
     ),
@@ -324,10 +382,16 @@ object RuleRegistry {
       docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
       defaultConfidence = "medium"
     ),
+    // Stays Tier 3 (2026-10-13 probe): reading the plan through
+    // ExtendedAnalysisException is not 2.4's result. It matches 2.4.8's
+    // plan.isDefined for unresolved columns, type mismatches, bad GROUP BY,
+    // union arity, df.col, undefined functions and parse errors, but a missing
+    // table (spark.table, SELECT ... FROM, insertInto) has a plan on 3.5.5
+    // where 2.4.8 had None.
     RuleMeta(
       ruleId = "AnalysisExceptionPlanFieldDetect",
       tier = 3,
-      description = "Flags AnalysisException.plan field access -- Spark 3.5 reshapes how a failed analysis's plan is exposed on the caught exception.",
+      description = "AnalysisException.plan was removed in Spark 3.x; the plan of a failed analysis is on org.apache.spark.sql.catalyst.ExtendedAnalysisException. Reading it there is not always 2.4's answer: a missing table now carries a plan where 2.4 had None.",
       docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
       defaultConfidence = "medium"
     ),
@@ -379,17 +443,33 @@ object RuleRegistry {
       docLink = "https://spark.apache.org/docs/latest/core-migration-guide.html",
       defaultConfidence = "high"
     ),
+    // Tier 1 since 2026-10-13: 2.4.8's isRunningLocally is `return false`.
     RuleMeta(
       ruleId = "IsRunningLocallyWarn",
-      tier = 3,
-      description = "TaskContext.isRunningLocally() was removed in Spark 3.0 along with local execution, so the code path it guards is dead.",
+      tier = 1,
+      description = "TaskContext.isRunningLocally() was removed in Spark 3.0 along with local execution; in 2.4.8 it always returned false, so the call is rewritten to false when its receiver (TaskContext.get(), a val or a parameter) has no side effect.",
       docLink = "https://archive.apache.org/dist/spark/docs/3.0.0/core-migration-guide.html",
       defaultConfidence = "high"
     ),
     RuleMeta(
-      ruleId = "FromWithoutSelectDetect",
+      ruleId = "IsRunningLocallyWarn.Manual",
       tier = 3,
-      description = "Flags a SQL string that is a bare FROM (`FROM t`, no SELECT) -- accepted by accident in Spark 2.4, rejected by 3.0's parser. Hive's `FROM t SELECT c` still runs and is not flagged.",
+      description = "TaskContext.isRunningLocally() was removed in Spark 3.0; it always returned false in 2.4.8. The receiver may have side effects, so the call was not rewritten: replace it with false, keeping the receiver's evaluation if it matters.",
+      docLink = "https://archive.apache.org/dist/spark/docs/3.0.0/core-migration-guide.html",
+      defaultConfidence = "high"
+    ),
+    // Tier 1 since 2026-10-13: probed same columns and rows as 2.4.8.
+    RuleMeta(
+      ruleId = "FromWithoutSelectDetect",
+      tier = 1,
+      description = "A SQL string that is a bare FROM (`FROM t`, no SELECT) -- accepted by accident in Spark 2.4 as SELECT *, rejected by 3.0's parser -- is rewritten to SELECT * FROM t (probed: the same columns and rows, with WHERE, ORDER BY/LIMIT, JOIN, LATERAL VIEW). Hive's `FROM t SELECT c` still runs and is not flagged.",
+      docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
+      defaultConfidence = "high"
+    ),
+    RuleMeta(
+      ruleId = "FromWithoutSelectDetect.Manual",
+      tier = 3,
+      description = "A SQL string that is a bare FROM, rejected by Spark 3.0's parser, with GROUP BY, HAVING or WINDOW (where it does not mean SELECT *: 2.4 returned no columns for FROM t GROUP BY c) or a `;`. Add the SELECT list you mean.",
       docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
       defaultConfidence = "high"
     ),
@@ -400,12 +480,41 @@ object RuleRegistry {
       docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
       defaultConfidence = "high"
     ),
+    // Tier 1 since 2026-10-13 for the constructor only, targetOnly (the
+    // 3-argument constructor does not exist in 2.4.8); every other reference
+    // is the Tier 3 .Manual sub-id.
     RuleMeta(
       ruleId = "CalendarIntervalUsageDetect",
+      tier = 1,
+      description = "The CalendarInterval(months, microseconds) constructor was removed in Spark 3.0, which added a days field; new CalendarInterval(m, us) is rewritten to new CalendarInterval(m, 0, us), the same interval (probed: the same fields, arithmetic and equality).",
+      docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
+      defaultConfidence = "high",
+      targetOnly = true
+    ),
+    RuleMeta(
+      ruleId = "CalendarIntervalUsageDetect.Manual",
       tier = 3,
-      description = "Flags references to CalendarInterval -- from Spark 3.2 date/timestamp subtraction yields DayTimeIntervalType, so code typed against CalendarInterval no longer type-checks.",
+      description = "References to CalendarInterval: from Spark 3.0 an interval has separate months, days and microseconds fields, and from 3.2 date/timestamp subtraction yields DayTimeIntervalType, so code typed against CalendarInterval or reading its fields no longer type-checks or silently reads different numbers.",
       docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
       defaultConfidence = "medium"
+    ),
+    // New 2026-10-13, Tier 1, targetOnly: OneHotEncoder is the old
+    // Transformer in 2.4.8. javap and a fit/transform probe: the 3.5.5
+    // OneHotEncoder is 2.4.8's OneHotEncoderEstimator plus single-column params.
+    RuleMeta(
+      ruleId = "OneHotEncoderEstimatorRename",
+      tier = 1,
+      description = "OneHotEncoderEstimator was renamed to OneHotEncoder in Spark 3.0 (the old OneHotEncoder Transformer was removed); every reference is renamed. The 3.x OneHotEncoder has the same parameters, setters and OneHotEncoderModel (probed: the same output).",
+      docLink = "https://spark.apache.org/docs/latest/ml-migration-guide.html",
+      defaultConfidence = "high",
+      targetOnly = true
+    ),
+    RuleMeta(
+      ruleId = "OneHotEncoderEstimatorRename.Manual",
+      tier = 3,
+      description = "OneHotEncoderEstimator was renamed to OneHotEncoder in Spark 3.0, but this file also uses 2.4's old OneHotEncoder Transformer, which was removed; migrate that code, then rename OneHotEncoderEstimator to OneHotEncoder.",
+      docLink = "https://spark.apache.org/docs/latest/ml-migration-guide.html",
+      defaultConfidence = "high"
     ),
     RuleMeta(
       ruleId = "JsonEmptyStringDetect",
@@ -463,21 +572,47 @@ object RuleRegistry {
     RuleMeta(
       ruleId = "SparkSQLCallExternal.FORMATSTRONEINDEX_L004",
       tier = 1,
-      description = "sqlfluff plugin: format_string's %0$ zero-indexed form (silently treated as %1$ under 2.4/JDK8) is rewritten to the explicit 1-based index.",
+      description = "sqlfluff plugin: format_string's %0$ zero-indexed form (silently treated as %1$ under 2.4/JDK8) is rewritten to %1$ where the auto-generated column name is discarded (aliased, or outside the SELECT list).",
       docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
       defaultConfidence = "high"
     ),
     RuleMeta(
       ruleId = "SparkSQLCallExternal.SPARKSQL_L004",
       tier = 1,
-      description = "sqlfluff plugin: extract(second from ts) changed return type from IntegerType (2.4) to DecimalType(8,6) (3.0+); rewritten to preserve the original integer behavior.",
+      description = "sqlfluff plugin: extract(second from ts) changed return type from IntegerType (2.4) to DecimalType(8,6) (3.0+); rewritten to second(ts), which is what 2.4 parsed it into: the same value, type and column name.",
+      docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
+      defaultConfidence = "high"
+    ),
+    // The three audited fix codes are Tier 1 only where the literal was
+    // rewritten whole. A site the plugin offers no fix for (an unaliased
+    // SELECT item, whose auto-generated column name the fix would change), or
+    // a literal that could not be fixed whole, is reported under
+    // `<code>.Manual` at Tier 3 and left as written.
+    RuleMeta(
+      ruleId = "SparkSQLCallExternal.FORMATSTRONEINDEX_L004.Manual",
+      tier = 3,
+      description = "sqlfluff plugin: format_string's %0$ zero-indexed form (read as %1$ by 2.4/JDK 8, rejected on JDK 17) was not rewritten, because %1$ would change an unaliased SELECT item's auto-generated column name (or the literal could not be fixed whole). Alias it with its 2.4 name and use %1$.",
+      docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
+      defaultConfidence = "high"
+    ),
+    RuleMeta(
+      ruleId = "SparkSQLCallExternal.SPARKSQL_L004.Manual",
+      tier = 3,
+      description = "sqlfluff plugin: extract(second from ts) returns DecimalType(8,6) from Spark 3.0 (2.4: an int); this literal was not rewritten to second(ts) because it could not be fixed whole. Apply second(ts) by hand.",
+      docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
+      defaultConfidence = "high"
+    ),
+    RuleMeta(
+      ruleId = "SparkSQLCallExternal.SPARKSQL_L005.Manual",
+      tier = 3,
+      description = "sqlfluff plugin: approx_percentile's accuracy must be integral from Spark 3.0 (2.4 coerced a fractional one); not rewritten, because int(accuracy) would change an unaliased SELECT item's auto-generated column name (or the literal could not be fixed whole). Alias it with its 2.4 name and wrap the accuracy in int(...).",
       docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
       defaultConfidence = "high"
     ),
     RuleMeta(
       ruleId = "SparkSQLCallExternal.SPARKSQL_L005",
       tier = 1,
-      description = "sqlfluff plugin: approx_percentile's accuracy argument must be an exact integral type from Spark 3.0 (2.4 silently coerced a fractional one); rewritten to cast(... as int).",
+      description = "sqlfluff plugin: approx_percentile's accuracy argument must be an exact integral type from Spark 3.0 (2.4 silently coerced a fractional one); rewritten to int(...) where the auto-generated column name is discarded (aliased, or outside the SELECT list).",
       docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
       defaultConfidence = "high"
     ),

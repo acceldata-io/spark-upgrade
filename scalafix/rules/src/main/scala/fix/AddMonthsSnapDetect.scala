@@ -1,6 +1,6 @@
 package fix
 
-import fix.support.{RuleChange, RuleFinding}
+import fix.support.{ColumnNames, RuleChange, RuleFinding}
 import scalafix.v1._
 
 import scala.meta._
@@ -87,36 +87,6 @@ class AddMonthsSnapDetect extends SemanticRule("AddMonthsSnapDetect") {
     case _ => false
   }
 
-  private def isOwnedBy(t: Tree, owner: String)(implicit doc: SemanticDocument): Boolean =
-    t.symbol.owner.value == owner
-
-  private def isColumnApi(t: Tree)(implicit doc: SemanticDocument): Boolean =
-    isOwnedBy(t, "org/apache/spark/sql/functions.") || isOwnedBy(t, "org/apache/spark/sql/Column#")
-
-  private val aliasMethods = Set("as", "alias", "name")
-  private val unnamedDatasetArgs = Set("filter", "where", "orderBy", "sort", "sortWithinPartitions", "join", "joinWith")
-
-  // True when the Column expression containing `node` never becomes a named
-  // output column, so the rewrite's different auto-generated name (CASE WHEN
-  // ... instead of add_months(d, n)) cannot leak: it is aliased (.as/.alias/
-  // .name), is withColumn's value, or is a filter/where/orderBy/sort/join
-  // argument. Walks up through Column functions and operators only; anything
-  // else (select, agg, a val, ...) is conservatively false.
-  private def nameDiscarded(node: Tree)(implicit doc: SemanticDocument): Boolean = node.parent match {
-    case Some(sel @ Term.Select(qual, name)) if qual eq node =>
-      if (aliasMethods(name.value) && isOwnedBy(name, "org/apache/spark/sql/Column#")) true
-      else isColumnApi(name) && nameDiscarded(sel)
-    case Some(app @ Term.Apply(fun, _)) if fun eq node => nameDiscarded(app)
-    case Some(app @ Term.Apply(fun, args)) if args.exists(_ eq node) =>
-      fun match {
-        case Term.Select(_, name) if isOwnedBy(name, "org/apache/spark/sql/Dataset#") =>
-          unnamedDatasetArgs(name.value) || (name.value == "withColumn" && (args.last eq node))
-        case _ => isColumnApi(fun) && nameDiscarded(app)
-      }
-    case Some(infix @ Term.ApplyInfix(_, op, _, _)) => isColumnApi(op) && nameDiscarded(infix)
-    case _ => false
-  }
-
   override def fix(implicit doc: SemanticDocument): Patch = {
     val utils = new Utils()
     doc.tree.collect {
@@ -131,7 +101,7 @@ class AddMonthsSnapDetect extends SemanticRule("AddMonthsSnapDetect") {
         val aliasNote =
           "The rewritten column's auto-generated name is a CASE WHEN ... expression instead of add_months(...), so alias it " +
             "with .as(\"<the name 2.4 gave it>\") if the column name matters."
-        if (isSafeDate(d) && isSafeMonths(n) && nameDiscarded(t)) {
+        if (isSafeDate(d) && isSafeMonths(n) && ColumnNames.nameDiscarded(t)) {
           // A bare call gets the three functions imported unless functions._ is.
           val imports =
             if (prefix.nonEmpty) Patch.empty

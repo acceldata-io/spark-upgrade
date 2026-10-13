@@ -1,6 +1,7 @@
 package com.acceldata.openrewrite.spark;
 
 import org.junit.jupiter.api.Test;
+import org.openrewrite.java.JavaParser;
 import org.openrewrite.test.RecipeSpec;
 import org.openrewrite.test.RewriteTest;
 
@@ -27,6 +28,22 @@ class SparkOneHotEncoderEstimatorUsageDetectTest implements RewriteTest {
                         /*~~(OneHotEncoderEstimator is renamed to OneHotEncoder in Spark 3.0 -- update the class name (the old OneHotEncoder itself is removed).)~~>*/import org.apache.spark.ml.feature.OneHotEncoderEstimator;
 
                         class Pipeline {
+                        }
+                        """
+                )
+        );
+    }
+
+    @Test
+    void leavesAnImportWhoseTypeResolvesToTheRename() {
+        rewriteRun(
+                spec -> spec.parser(JavaParser.fromJavaVersion().dependsOn(SparkOneHotEncoderEstimatorRenameTest.ESTIMATOR_STUB)),
+                java(
+                        """
+                        import org.apache.spark.ml.feature.OneHotEncoderEstimator;
+
+                        class Pipeline {
+                            OneHotEncoderEstimator encoder;
                         }
                         """
                 )

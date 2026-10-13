@@ -40,7 +40,8 @@ object SparkSQLCallExternal {
    * others are reported but never applied: SPARKSQLCAST_L001's rewrite is a
    * no-op, NOCHARS_L003's also rewrites Hive DDL, and RESERVEDROPERTIES_L002's
    * can produce SQL Spark rejects -- those two are restored by config instead. */
-  val fixCodes: String = Seq("FORMATSTRONEINDEX_L004", "SPARKSQL_L004", "SPARKSQL_L005").mkString(",")
+  val fixCodeSet: Set[String] = Set("FORMATSTRONEINDEX_L004", "SPARKSQL_L004", "SPARKSQL_L005")
+  val fixCodes: String = fixCodeSet.toSeq.sorted.mkString(",")
 
   lazy val available: Boolean = probe().isEmpty
 
@@ -172,16 +173,32 @@ class SparkSQLCallExternal extends SemanticRule("SparkSQLCallExternal") {
     // post-fix lint as a DIFFERENT code (SPARKSQLCAST_L001) -- a
     // self-referential false positive on code that was just correctly
     // fixed. Linting the original avoids both.
+    def lint(sqlFile: File): Set[String] = sqlfluffOutput(Seq("lint"), sqlFile) match {
+      case Some(output) => output.linesIterator.collect { case lintLine(code) => code }.toSet
+      case None => Set.empty[String]
+    }
+
+    // The fixed SQL is kept only when the literal is fixed WHOLE: a lint of
+    // the result shows none of the audited fix codes, no code the original
+    // did not have, and no parse error -- the same acceptance test as the
+    // CLI's SqlLiteralLinter.lintAndPlan. The plugin offers no fix where the
+    // auto-generated column name would change (an unaliased SELECT item), so
+    // such a site stays flagged, the literal is left as written, and its
+    // codes are reported as `<CODE>.Manual` (Tier 3) rather than as done.
     def analyze(original: String, sqlFile: File): (Option[String], Set[String]) = {
-      val flagged = sqlfluffOutput(Seq("lint"), sqlFile) match {
-        case Some(output) => output.linesIterator.collect { case lintLine(code) => code }.toSet
-        case None => Set.empty[String]
-      }
+      val flagged = lint(sqlFile)
+      if (!flagged.exists(SparkSQLCallExternal.fixCodeSet.contains)) return (None, flagged)
       sqlfluffOutput(Seq("fix", "-f"), sqlFile, SparkSQLCallExternal.fixCodes)
       val fixed = Try(scala.io.Source.fromFile(sqlFile).mkString).toOption
       // We don't care about whitespace-only changes.
       val rewritten = fixed.filter(newSQL => newSQL.filterNot(_.isWhitespace) != original.filterNot(_.isWhitespace))
-      (rewritten, flagged)
+      val accepted = rewritten.filter { _ =>
+        val after = lint(sqlFile)
+        !after.exists(SparkSQLCallExternal.fixCodeSet.contains) &&
+          after.forall(pluginRuleCodes.contains) &&
+          after.subsetOf(flagged)
+      }
+      (accepted, flagged)
     }
 
     def matchOnTree(e: Tree): Patch = {
@@ -226,27 +243,10 @@ class SparkSQLCallExternal extends SemanticRule("SparkSQLCallExternal") {
                   // `"""` sequence. Report those as review-only rather than
                   // writing source that no longer compiles.
                   val safeToInline = (s: String) => !s.contains("\"\"\"") && !s.endsWith("\"")
-                  val rewritePatch = rewritten match {
-                    case Some(newSQL) if safeToInline(newSQL) =>
-                      RuleFinding.report(
-                        RuleChange(
-                          "SparkSQLCallExternal",
-                          "sqlfluff found formatting/dialect issues in this literal SQL string.",
-                          "Reformatted the SQL with sqlfluff's sparksql dialect.",
-                          endPos
-                        ),
-                        Patch.replaceTree(param, "\"\"\"" + newSQL + "\"\"\"")
-                      )
-                    case Some(_) =>
-                      RuleFinding.report(
-                        RuleChange(
-                          "SparkSQLCallExternal",
-                          "sqlfluff rewrote this SQL, but the result can't be embedded back as a triple-quoted Scala literal " +
-                            "(it ends in a double quote or contains a \"\"\" sequence).",
-                          "No auto-rewrite; apply sqlfluff's suggested SQL by hand.",
-                          endPos
-                        )
-                      )
+                  val applied: Option[String] = rewritten.filter(safeToInline)
+                  val notInlinable = rewritten.isDefined && applied.isEmpty
+                  val rewritePatch = applied match {
+                    case Some(newSQL) => Patch.replaceTree(param, "\"\"\"" + newSQL + "\"\"\"")
                     case None => Patch.empty
                   }
                   // sqlfluff reports its own PRS (parse) violations regardless
@@ -260,8 +260,10 @@ class SparkSQLCallExternal extends SemanticRule("SparkSQLCallExternal") {
                   // unparsable to sqlfluff and surfaced only as PRS.)
                   val (pluginCodes, parserCodes) = stillFlagged.partition(pluginRuleCodes.contains)
 
+                  // A bare `FROM t` is FromWithoutSelectDetect's: it reports
+                  // (and, where exact, rewrites) it, so it is not also "unparseable".
                   val unparseablePatch =
-                    if (parserCodes.isEmpty) Patch.empty
+                    if (parserCodes.isEmpty || FromWithoutSelectDetect.leadingFrom.findFirstIn(sql).isDefined) Patch.empty
                     else
                       RuleFinding.report(
                         RuleChange(
@@ -269,8 +271,7 @@ class SparkSQLCallExternal extends SemanticRule("SparkSQLCallExternal") {
                           "sqlfluff's sparksql dialect could not parse this SQL literal, so NONE of the Family K " +
                             "SQL rules were evaluated against it -- treat this as 'not checked', not 'clean'. " +
                             "Common causes: syntax Spark accepts but the dialect doesn't model yet, and syntax " +
-                            "Spark 3.x itself rejects (a bare `FROM t`, for instance, which FromWithoutSelectDetect " +
-                            "reports separately).",
+                            "Spark 3.x itself rejects.",
                           "No auto-rewrite; review this SQL by hand.",
                           endPos
                         )
@@ -289,17 +290,29 @@ class SparkSQLCallExternal extends SemanticRule("SparkSQLCallExternal") {
                   // orchestrator maps a config to a RULE ID -- so with one
                   // shared id it could neither tell which change was found nor
                   // key a config off it. See the 2026-08-22 review SS6.3.2.
+                  //
+                  // An audited fix code is Tier 1 (`SparkSQLCallExternal.<CODE>`)
+                  // only when this literal really was rewritten; otherwise it is
+                  // `SparkSQLCallExternal.<CODE>.Manual` (Tier 3), so a site the
+                  // plugin did not fix never shows as done.
                   val detectPatch =
                     pluginCodes.toSeq.sorted.map { code =>
-                      RuleFinding.report(
-                        RuleChange(
-                          s"SparkSQLCallExternal.$code",
-                          s"sqlfluff's sparksql-upgrade plugin flagged this SQL for $code. " +
-                            "See spark-upgrade/sql's rule docs (sparksql_upgrade/rules.py) for what changed and why.",
-                          "No auto-rewrite; review manually.",
-                          endPos
-                        )
-                      )
+                      val why = s"sqlfluff's sparksql-upgrade plugin flagged this SQL for $code. " +
+                        "See spark-upgrade/sql's rule docs (sparksql_upgrade/rules.py) for what changed and why."
+                      val change =
+                        if (!SparkSQLCallExternal.fixCodeSet.contains(code)) "No auto-rewrite; review manually."
+                        else if (applied.isDefined) s"Rewrote the SQL to: ${applied.get.trim}"
+                        else if (notInlinable)
+                          "Not rewritten: the fixed SQL can't be embedded back as a triple-quoted Scala literal (it ends in a " +
+                            "double quote or contains a \"\"\" sequence); apply the fix by hand."
+                        else
+                          "Not rewritten: the fix would change the auto-generated column name (an unaliased SELECT item), or " +
+                            "the literal could not be fixed whole. Alias the expression with its 2.4 name and apply the fix, " +
+                            "or apply it by hand."
+                      val id =
+                        if (SparkSQLCallExternal.fixCodeSet.contains(code) && applied.isEmpty) s"SparkSQLCallExternal.$code.Manual"
+                        else s"SparkSQLCallExternal.$code"
+                      RuleFinding.report(RuleChange(id, why, change, endPos))
                     }.asPatch
                   List(rewritePatch, detectPatch, unparseablePatch).asPatch
                 case _ =>

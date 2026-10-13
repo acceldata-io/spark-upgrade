@@ -15,7 +15,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * every Java finding's reported line was three lines early (the unified-diff
  * context size), and two independent occurrences sharing one hunk collapsed
  * into a single finding. Revert {@code parseHunks} to reporting the hunk
- * header's {@code +newStart} once per hunk and both tests below go red.
+ * header's start once per hunk and the first two tests below go red.
  *
  * <p>The diffs are built with explicit {@code \n} joins rather than a text
  * block on purpose: a text block strips incidental leading whitespace, and
@@ -67,9 +67,9 @@ class RunnerHunkParsingTest {
         List<Runner.Hunk> hunks = Runner.parseHunks(TWO_OCCURRENCES_ONE_HUNK);
 
         assertThat(hunks).hasSize(2);
-        assertThat(hunks.get(0).newStartLine).isEqualTo(12);
+        assertThat(hunks.get(0).oldStartLine).isEqualTo(12);
         assertThat(hunks.get(0).snippet).contains("functions.array()").doesNotContain("functions.map()");
-        assertThat(hunks.get(1).newStartLine).isEqualTo(16);
+        assertThat(hunks.get(1).oldStartLine).isEqualTo(16);
         assertThat(hunks.get(1).snippet).contains("functions.map()").doesNotContain("functions.array()");
     }
 
@@ -78,8 +78,46 @@ class RunnerHunkParsingTest {
         List<Runner.Hunk> hunks = Runner.parseHunks(ONE_CONTIGUOUS_BLOCK);
 
         assertThat(hunks).hasSize(1);
-        assertThat(hunks.get(0).newStartLine).isEqualTo(10);
+        assertThat(hunks.get(0).oldStartLine).isEqualTo(10);
         assertThat(hunks.get(0).snippet).contains("shuffleBytesWritten").contains("recordsWritten");
+    }
+
+    /** A rewrite that adds imports: the call is on line 25 of the ORIGINAL
+     * file. Reported at the old line, once -- not at 28 (the new file's line,
+     * shifted by the two added imports), and not once more per import. */
+    private static final String REWRITE_WITH_ADDED_IMPORTS = String.join("\n",
+            "@@ -3,4 +3,6 @@",
+            " import org.apache.spark.sql.Column;",
+            "+import static org.apache.spark.sql.functions.last_day;",
+            "+import static org.apache.spark.sql.functions.when;",
+            " ",
+            " public class ClaimEnricher {",
+            "@@ -23,5 +25,5 @@",
+            "     Dataset<Row> enrich(Dataset<Row> claims) {",
+            "         return claims",
+            "-            .withColumn(\"next_cycle\", add_months(col(\"service_date\"), 1));",
+            "+            .withColumn(\"next_cycle\", when(to_date(col(\"service_date\")).equalTo(last_day(col(\"service_date\"))), last_day(add_months(col(\"service_date\"), 1))).otherwise(add_months(col(\"service_date\"), 1)));",
+            "     }");
+
+    @Test
+    void reportsTheOriginalLineAndNotTheImportsARewriteAdded() {
+        List<Runner.Hunk> hunks = Runner.parseHunks(REWRITE_WITH_ADDED_IMPORTS);
+
+        assertThat(hunks).hasSize(1);
+        assertThat(hunks.get(0).oldStartLine).isEqualTo(25);
+        assertThat(hunks.get(0).snippet).contains("next_cycle");
+    }
+
+    @Test
+    void anImportOnlyChangeIsStillReportedWhenItIsAllThereIs() {
+        String importOnly = String.join("\n",
+                "@@ -3,2 +3,2 @@",
+                "-import org.apache.spark.ml.feature.OneHotEncoderEstimator;",
+                "+import org.apache.spark.ml.feature.OneHotEncoder;",
+                " ");
+        List<Runner.Hunk> hunks = Runner.parseHunks(importOnly);
+        assertThat(hunks).hasSize(1);
+        assertThat(hunks.get(0).oldStartLine).isEqualTo(3);
     }
 
     @Test

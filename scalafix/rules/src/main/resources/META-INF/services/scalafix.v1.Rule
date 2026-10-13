@@ -50,3 +50,4 @@ fix.JsonEmptyStringDetect
 fix.CsvBinaryTypeDetect
 fix.ProcedureSyntaxDetect
 fix.StoreAssignmentPolicyDetect
+fix.OneHotEncoderEstimatorRename

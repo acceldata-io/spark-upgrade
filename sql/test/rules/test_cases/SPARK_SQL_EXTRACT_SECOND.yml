@@ -7,7 +7,7 @@ extract_second:
   fail_str: |
     select extract(second from to_timestamp('2019-09-20 10:10:10.1'))
   fix_str: |
-    select int(extract(second from to_timestamp('2019-09-20 10:10:10.1')))
+    select second(to_timestamp('2019-09-20 10:10:10.1'))
 
 extract_second_existing_cast:
   configs:
@@ -16,4 +16,30 @@ extract_second_existing_cast:
   fail_str: |
     INSERT OVERWRITE foo.bar SELECT CAST(extract(second from to_timestamp('2019-09-20 10:10:11.1')) AS STRING) AS a
   fix_str: |
-    INSERT OVERWRITE foo.bar SELECT CAST(int(extract(second from to_timestamp('2019-09-20 10:10:11.1'))) AS STRING) AS a
+    INSERT OVERWRITE foo.bar SELECT CAST(second(to_timestamp('2019-09-20 10:10:11.1')) AS STRING) AS a
+
+# second(x) is the expression 2.4 built for extract(second FROM x), so it is
+# applied everywhere: value, type and column name are 2.4's.
+extract_second_everywhere:
+  configs:
+    core:
+      dialect: sparksql
+  fail_str: |
+    SELECT EXTRACT(SECOND FROM t.ts) + 1, count(*) FROM t WHERE extract(second FROM ts) > 1 GROUP BY EXTRACT(SECOND FROM t.ts)
+  fix_str: |
+    SELECT second(t.ts) + 1, count(*) FROM t WHERE second(ts) > 1 GROUP BY second(t.ts)
+
+# An earlier fix's int(...) wrapper is left alone.
+extract_second_already_int:
+  configs:
+    core:
+      dialect: sparksql
+  pass_str: |
+    SELECT int(extract(second FROM ts)) AS s FROM t
+
+extract_minute:
+  configs:
+    core:
+      dialect: sparksql
+  pass_str: |
+    SELECT extract(minute FROM ts) FROM t

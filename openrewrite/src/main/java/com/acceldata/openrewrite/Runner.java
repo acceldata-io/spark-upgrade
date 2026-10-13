@@ -151,7 +151,7 @@ public final class Runner {
         String file = after.getSourcePath().toString();
         String diff = result.diff();
         for (Hunk hunk : parseHunks(diff)) {
-            writeFinding(out, recipeId, file, hunk.newStartLine, hunk.snippet);
+            writeFinding(out, recipeId, file, hunk.oldStartLine, hunk.snippet);
         }
     }
 
@@ -159,11 +159,13 @@ public final class Runner {
      * NOT the whole hunk. See {@link #parseHunks}. Package-private so
      * {@code RunnerHunkParsingTest} can assert on it directly. */
     static final class Hunk {
-        final int newStartLine;
+        /** The line in the ORIGINAL file: findings are about the source the
+         * analysis read, and the CLI pairs them with diff hunks by old line. */
+        final int oldStartLine;
         final String snippet;
 
-        Hunk(int newStartLine, String snippet) {
-            this.newStartLine = newStartLine;
+        Hunk(int oldStartLine, String snippet) {
+            this.oldStartLine = oldStartLine;
             this.snippet = snippet;
         }
     }
@@ -193,11 +195,38 @@ public final class Runner {
     //     is under-reporting, the same class of bug as reporting success for
     //     work not done.
     //
-    // Line accounting is the standard unified-diff rule: context and `+` lines
-    // advance the new-file counter, `-` lines do not (they exist only in the
-    // old file). A `\` line ("\ No newline at end of file") is metadata and
-    // advances nothing.
+    // Line accounting is the standard unified-diff rule, on the OLD file's
+    // side: context and `-` lines advance the old-file counter, `+` lines do
+    // not (they exist only in the new file). Reporting new-file lines put
+    // every finding after an added import a few lines low (2026-10-13). A `\`
+    // line ("\ No newline at end of file") is metadata and advances nothing.
+    //
+    // A block that only adds or removes imports is the side effect of a
+    // rewrite elsewhere in the file, not a site of its own, so it is dropped
+    // when the file has another block (2026-10-13: an add_months rewrite was
+    // reported three times, once per import it added).
     static List<Hunk> parseHunks(String diff) {
+        List<Hunk> all = parseBlocks(diff);
+        List<Hunk> sites = new ArrayList<>();
+        for (Hunk h : all) {
+            if (!importsOnly(h.snippet)) {
+                sites.add(h);
+            }
+        }
+        return sites.isEmpty() ? all : sites;
+    }
+
+    private static boolean importsOnly(String snippet) {
+        for (String line : snippet.split("\n")) {
+            String code = line.length() > 0 ? line.substring(1).trim() : "";
+            if (!code.isEmpty() && !code.startsWith("import ")) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static List<Hunk> parseBlocks(String diff) {
         List<Hunk> hunks = new ArrayList<>();
         String[] lines = diff.split("\n", -1);
         int i = 0;
@@ -206,7 +235,7 @@ public final class Runner {
                 i++;
                 continue;
             }
-            int newLine = parseNewStartLine(lines[i]);
+            int oldLine = parseOldStartLine(lines[i]);
             int blockStart = 0;
             StringBuilder block = new StringBuilder();
 
@@ -220,18 +249,18 @@ public final class Runner {
                 boolean removed = body.startsWith("-");
                 if (added || removed) {
                     if (block.length() == 0) {
-                        blockStart = newLine;
+                        blockStart = oldLine;
                     }
                     block.append(body).append('\n');
-                    if (added) {
-                        newLine++;
+                    if (removed) {
+                        oldLine++;
                     }
                 } else {
                     if (block.length() > 0) {
                         hunks.add(new Hunk(blockStart, block.toString().trim()));
                         block.setLength(0);
                     }
-                    newLine++;
+                    oldLine++;
                 }
             }
             if (block.length() > 0) {
@@ -242,17 +271,17 @@ public final class Runner {
         return hunks;
     }
 
-    private static int parseNewStartLine(String hunkHeader) {
-        int plusIdx = hunkHeader.indexOf('+');
-        if (plusIdx < 0) {
+    private static int parseOldStartLine(String hunkHeader) {
+        int minusIdx = hunkHeader.indexOf('-');
+        if (minusIdx < 0) {
             return 0;
         }
-        int end = plusIdx + 1;
+        int end = minusIdx + 1;
         while (end < hunkHeader.length() && (Character.isDigit(hunkHeader.charAt(end)))) {
             end++;
         }
         try {
-            return Integer.parseInt(hunkHeader.substring(plusIdx + 1, end));
+            return Integer.parseInt(hunkHeader.substring(minusIdx + 1, end));
         } catch (NumberFormatException e) {
             return 0;
         }

@@ -1,6 +1,7 @@
 """Custom Spark SQL upgrade rules."""
 
 import os.path
+import re
 from typing import Optional
 
 
@@ -114,6 +115,13 @@ class Rule_FORMATSTRONEINDEX_L004(BaseRule):
 
     Previously on JDK8 format strings were still one indexed, but zero was treated as one.
     On JDK17 an exception was thrown.
+
+    The fix (%0$ -> %1$) is JDK 8's own reading, so values are exact. It also
+    changes the format string inside the expression, and with it Spark's
+    auto-generated column name (`format_string(%1$s, s)` against 2.4's
+    `format_string(%0$s, s)`). So the fix is only offered where that name is
+    discarded -- an aliased SELECT item, or outside the SELECT list (WHERE,
+    ORDER BY, JOIN ON, ...). An unaliased SELECT item is flagged without a fix.
     """
 
     groups = ("all",)
@@ -122,43 +130,25 @@ class Rule_FORMATSTRONEINDEX_L004(BaseRule):
 
     def _eval(self, context: RuleContext) -> Optional[LintResult]:
         """Check for invalid format strs"""
-        functional_context = FunctionalContext(context)
-        children = functional_context.segment.children()
-        function_name_id_seg = (
-            children.first(sp.is_type("function_name"))
-            .children()
-            .first(sp.is_type("function_name_identifier"))[0]
-        )
-        raw_function_name = function_name_id_seg.raw.upper().strip()
-        function_name = raw_function_name.upper().strip()
-        bracketed_segments = children.first(sp.is_type("bracketed"))
-        if not bracketed_segments:
+        if _function_name(context) not in ("FORMAT_STRING", "PRINTF"):
             return None
-        bracketed = bracketed_segments[0]
-
-        # Is this a cast function call
-        if function_name == "FORMAT_STRING":
-            print("Found format string function!")
-            format_str_seg = bracketed.get_child("expression").get_child(
-                "quoted_literal"
-            )
-            format_str = format_str_seg.raw
-            # If we don't use the bad sequence just return right away.
-            if "%0$" not in format_str:
-                return None
-            else:
-                # Replace %0$ with %1$
-                return LintResult(
-                    anchor=context.segment,
-                    fixes=[
-                        LintFix.replace(
-                            format_str_seg,
-                            [format_str_seg.edit(format_str.replace("%0$", "%1$"))],
-                        ),
-                    ],
-                )
-
-        return None
+        bracketed = context.segment.get_child("bracketed")
+        first_arg = bracketed.get_child("expression") if bracketed else None
+        format_str_seg = first_arg.get_child("quoted_literal") if first_arg else None
+        # Only a literal format string can be read; `%0$` must be in it.
+        if format_str_seg is None or "%0$" not in format_str_seg.raw:
+            return None
+        if _select_name_kept(context):
+            return LintResult(anchor=context.segment)
+        return LintResult(
+            anchor=context.segment,
+            fixes=[
+                LintFix.replace(
+                    format_str_seg,
+                    [format_str_seg.edit(format_str_seg.raw.replace("%0$", "%1$"))],
+                ),
+            ],
+        )
 
 
 class Rule_NOCHARS_L003(BaseRule):
@@ -353,6 +343,13 @@ class Rule_SPARKSQL_L004(BaseRule):
     extract(second from to_timestamp('2019-09-20 10:10:10.1')) results
     10.100000. In Spark version 2.4 and earlier, it returns an IntegerType
     value and the result for the former example is 10.
+
+    The fix is `second(x)`: Spark 2.4's parser turned `extract(second FROM x)`
+    into exactly that expression, so the value, the type (int) and the
+    auto-generated column name (`second(x)`) are all 2.4's -- probed on 2.4.8
+    and 3.5.5. The earlier `int(extract(...))` fix got the value right but
+    named the column `extract(second FROM x)`; code already wrapped that way
+    is left alone.
     """
 
     groups = ("all",)
@@ -360,48 +357,37 @@ class Rule_SPARKSQL_L004(BaseRule):
     is_fix_compatible = True
 
     def _eval(self, context: RuleContext) -> Optional[LintResult]:
-        functional_context = FunctionalContext(context)
-        children = functional_context.segment.children()
-        function_name_id_seg = (
-            children.first(sp.is_type("function_name"))
-            .children()
-            .first(sp.is_type("function_name_identifier"))[0]
-        )
-        raw_function_name = function_name_id_seg.raw.upper().strip()
-        function_name = raw_function_name.upper().strip()
-        bracketed_segments = children.first(sp.is_type("bracketed"))
-        if not bracketed_segments:
+        if _function_name(context) != "EXTRACT":
             return None
-        bracketed = bracketed_segments[0]
+        bracketed = context.segment.get_child("bracketed")
+        if not bracketed:
+            return None
+        date_part = bracketed.get_child("date_part")
+        source = bracketed.get_child("expression")
+        if date_part is None or source is None or date_part.raw.upper().strip() != "SECOND":
+            return None
 
-        if function_name == "EXTRACT":
-            print("Found extract function!")
+        functional_context = FunctionalContext(context)
+        parent_stack_reversed = functional_context.parent_stack.reversed()
+        if (
+            len(parent_stack_reversed) >= 3 and
+            parent_stack_reversed[0].get_type() == "expression" and
+            parent_stack_reversed[1].get_type() == "bracketed" and
+            parent_stack_reversed[2].get_type() == "function" and
+            parent_stack_reversed[2].segments[0].raw.upper().strip() == "INT"
+        ):
+            return None
 
-            parent_stack_reversed = functional_context.parent_stack.reversed()
-            if (
-                parent_stack_reversed[0].get_type() == "expression" and
-                parent_stack_reversed[1].get_type() == "bracketed" and
-                parent_stack_reversed[2].get_type() == "function"
-            ):
-                if parent_stack_reversed[2].segments[0].raw.upper().strip() == "INT":
-                    return None
-
-            date_part_into = bracketed.get_child("date_part").raw.upper().strip()
-            if date_part_into == "SECOND":
-                edits = [
-                    KeywordSegment("int"),
-                    SymbolSegment("(", type="start_bracket"),
-                    context.segment,
-                    SymbolSegment(")", type="end_bracket"),
-                ]
-                return LintResult(
-                    anchor=context.segment,
-                    fixes=[
-                        LintFix.replace(context.segment, edits),
-                    ],
-                )
-
-        return None
+        edits = [
+            KeywordSegment("second"),
+            SymbolSegment("(", type="start_bracket"),
+            source,
+            SymbolSegment(")", type="end_bracket"),
+        ]
+        return LintResult(
+            anchor=context.segment,
+            fixes=[LintFix.replace(context.segment, edits)],
+        )
 
 
 class Rule_GLOBALTEMPVIEW_L006(BaseRule):
@@ -453,6 +439,15 @@ class Rule_SPARKSQL_L005(BaseRule):
     In Spark version 2.4 and below, if accuracy is fractional or
     string value, it is coerced to an int value, percentile_approx(10.0, 0.2, 1.8D)
     is operated as percentile_approx(10.0, 0.2, 1) which results in 10.0.
+
+    Flags a fractional or string literal accuracy only: 2.4 already required
+    the accuracy to be a constant, and an integer literal is unchanged. The
+    fix `int(acc)` -- the same Cast as `cast(acc AS int)`, which
+    SPARKSQLCAST_L001 would flag -- is the coercion 2.4 applied (probed: same
+    values and type on 2.4.8 and 3.5.5). An unaliased SELECT item is flagged without
+    a fix: its auto-generated column name differs from 2.4's either way
+    (2.4.8 `percentile_approx(v, CAST(0.5 AS DOUBLE), CAST(1.8 AS INT))`,
+    3.5.5 `percentile_approx(v, 0.5, CAST(1.8 AS INT))`).
     """
 
     groups = ("all",)
@@ -460,69 +455,50 @@ class Rule_SPARKSQL_L005(BaseRule):
     is_fix_compatible = True
 
     def _eval(self, context: RuleContext) -> Optional[LintResult]:
-        functional_context = FunctionalContext(context)
-        children = functional_context.segment.children()
-        function_name_id_seg = (
-            children.first(sp.is_type("function_name"))
-            .children()
-            .first(sp.is_type("function_name_identifier"))[0]
+        if _function_name(context) not in ("APPROX_PERCENTILE", "PERCENTILE_APPROX"):
+            return None
+        bracketed = context.segment.get_child("bracketed")
+        if not bracketed:
+            return None
+        args = bracketed.get_children("expression")
+        if len(args) != 3:
+            return None
+        accuracy = args[2].segments
+        code = [seg for seg in accuracy if not seg.is_whitespace and not seg.is_meta]
+        if len(code) != 1:
+            return None
+        literal = code[0]
+        fractional = literal.is_type("numeric_literal") and not re.fullmatch(
+            r"[0-9]+[LSY]?", literal.raw, re.IGNORECASE
         )
-        raw_function_name = function_name_id_seg.raw.upper().strip()
-        function_name = raw_function_name.upper().strip()
-        bracketed_segments = children.first(sp.is_type("bracketed"))
+        if not (fractional or literal.is_type("quoted_literal")):
+            return None
+        if _select_name_kept(context):
+            return LintResult(anchor=context.segment)
+        edits = [
+            KeywordSegment("int"),
+            SymbolSegment("(", type="start_bracket"),
+            literal,
+            SymbolSegment(")", type="end_bracket"),
+        ]
+        return LintResult(
+            anchor=context.segment,
+            fixes=[LintFix.replace(literal, edits)],
+        )
 
-        if function_name == "APPROX_PERCENTILE" or function_name == "PERCENTILE_APPROX":
-            print(f"Found approx function! {function_name}")
 
-            expression_count = 0
-            expression_segment = None
-            # Find "middle" of the approx_percentile(bloop) (e.g. bloop)
-            for segment in bracketed_segments.children().iterate_segments(
-                sp.is_type("expression")
-            ):
-                expression_count += 1
-                if expression_count == 3:
-                    expression_segment = segment
+def _select_name_kept(context: RuleContext) -> bool:
+    """Whether the function sits in an unaliased SELECT item, at any depth.
 
-            if expression_segment is not None:
-                expression_child = expression_segment.children().first()
-                # cast can either be a keyword or a function depending on if were iterating on
-                # parsed on updated code.
-                if expression_child[0].type == "keyword":
-                    if expression_child.child[0].raw == "cast":
-                        return None
-                elif expression_child[0].type == "function":
-                    function_name_id_seg = (
-                        expression_child.children()
-                        .first(sp.is_type("function_name"))
-                        .children()
-                        .first(sp.is_type("function_name_identifier"))[0]
-                    )
-                    raw_function_name = function_name_id_seg.raw.upper().strip()
-                    function_name = raw_function_name.upper().strip()
-                    print(function_name)
-                    # If we see a cast then we know this was already fixed.
-                    if function_name == "CAST":
-                        return None
-                expression_child = expression_child[0]
-                edits = [
-                    KeywordSegment("cast"),
-                    SymbolSegment("(", type="start_bracket"),
-                    expression_child,
-                    WhitespaceSegment(),
-                    KeywordSegment("as"),
-                    WhitespaceSegment(),
-                    KeywordSegment("int"),
-                    SymbolSegment(")", type="end_bracket"),
-                ]
-                return LintResult(
-                    anchor=context.segment,
-                    fixes=[
-                        LintFix.replace(expression_child, edits),
-                    ],
-                )
-
-        return None
+    Spark names such a column after the whole expression's text, so a fix
+    that changes the expression changes the column name -- what a write, a
+    by-name reference or `df.columns` sees. An alias, or any place outside
+    the SELECT list (WHERE, ORDER BY, JOIN ON, GROUP BY), discards the name.
+    """
+    return any(
+        seg.is_type("select_clause_element") and seg.get_child("alias_expression") is None
+        for seg in context.parent_stack
+    )
 
 
 def _function_name(context: RuleContext) -> Optional[str]:

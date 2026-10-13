@@ -34,6 +34,11 @@ import com.acceldata.openrewrite.spark.SparkSqlContextConstructorDetect;
 import com.acceldata.openrewrite.spark.SparkSqlLiteralExtract;
 import com.acceldata.openrewrite.spark.SparkStoreAssignmentPolicyDetect;
 import com.acceldata.openrewrite.spark.SparkUnionAllRename;
+import com.acceldata.openrewrite.spark.SparkIsRunningLocallyRewrite;
+import com.acceldata.openrewrite.spark.SparkEmptyCollectionTypeRewrite;
+import com.acceldata.openrewrite.spark.SparkPathOptionConflictRewrite;
+import com.acceldata.openrewrite.spark.SparkOneHotEncoderEstimatorRename;
+import com.acceldata.openrewrite.spark.SparkCalendarIntervalConstructorRewrite;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -143,6 +148,14 @@ public final class RecipeCatalog {
         // 2026-10-13: the exact rewrite for the add_months calls it can prove
         // safe; SparkAddMonthsUsageWarn reports the rest.
         byId.put(SparkAddMonthsRewrite.class.getName(), new SparkAddMonthsRewrite());
+        // 2026-10-13 triage: exact rewrites for the sites each one can prove,
+        // split from a detect recipe that reports the rest (except the rename,
+        // whose detect reports only an import whose type did not resolve).
+        byId.put(SparkIsRunningLocallyRewrite.class.getName(), new SparkIsRunningLocallyRewrite());
+        byId.put(SparkEmptyCollectionTypeRewrite.class.getName(), new SparkEmptyCollectionTypeRewrite());
+        byId.put(SparkPathOptionConflictRewrite.class.getName(), new SparkPathOptionConflictRewrite());
+        byId.put(SparkOneHotEncoderEstimatorRename.class.getName(), new SparkOneHotEncoderEstimatorRename());
+        byId.put(SparkCalendarIntervalConstructorRewrite.class.getName(), new SparkCalendarIntervalConstructorRewrite());
         byId.put(SparkDateTimeFormatPatternDetect.class.getName(), new SparkDateTimeFormatPatternDetect());
         byId.put(SparkMesosUsageDetect.class.getName(), new SparkMesosUsageDetect());
         byId.put(SparkLog4j1UsageDetect.class.getName(), new SparkLog4j1UsageDetect());

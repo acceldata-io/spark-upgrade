@@ -1,5 +1,6 @@
 package com.acceldata.openrewrite.spark;
 
+import org.openrewrite.Cursor;
 import org.openrewrite.ExecutionContext;
 import org.openrewrite.Recipe;
 import org.openrewrite.TreeVisitor;
@@ -23,6 +24,9 @@ import org.openrewrite.marker.SearchResult;
  * declared type, a cast, a method return type, an import) via {@code
  * J.Identifier}'s resolved type -- OpenRewrite represents an unqualified
  * type reference this way, the same as a qualified one's last segment.
+ *
+ * <p>Skips the class name of a {@code new CalendarInterval(months,
+ * microseconds)} that {@link SparkCalendarIntervalConstructorRewrite} rewrites.
  */
 public class SparkCalendarIntervalUsageDetect extends Recipe {
 
@@ -57,7 +61,8 @@ public class SparkCalendarIntervalUsageDetect extends Recipe {
             @Override
             public J.Identifier visitIdentifier(J.Identifier identifier, ExecutionContext ctx) {
                 J.Identifier id = super.visitIdentifier(identifier, ctx);
-                if ("CalendarInterval".equals(id.getSimpleName()) && isCalendarInterval(id.getType())) {
+                if ("CalendarInterval".equals(id.getSimpleName()) && isCalendarInterval(id.getType()) &&
+                        !namesRewrittenConstructor()) {
                     return SearchResult.found(
                             id,
                             "CalendarInterval is referenced here. From Spark 3.2, subtracting two dates or two " +
@@ -66,6 +71,16 @@ public class SparkCalendarIntervalUsageDetect extends Recipe {
                     );
                 }
                 return id;
+            }
+
+            /** This identifier is the class name in a constructor call the rewrite recipe handles. */
+            private boolean namesRewrittenConstructor() {
+                Cursor parent = getCursor().getParentTreeCursor();
+                if (parent.getValue() instanceof J.FieldAccess) {
+                    parent = parent.getParentTreeCursor();
+                }
+                return parent.getValue() instanceof J.NewClass &&
+                        SparkCalendarIntervalConstructorRewrite.isRewritable((J.NewClass) parent.getValue(), parent);
             }
 
             private boolean isCalendarInterval(JavaType type) {

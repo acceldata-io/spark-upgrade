@@ -8,7 +8,11 @@ import org.apache.spark.unsafe.types.CalendarInterval
 object NewDetectors {
 
   def fromFirst(spark: SparkSession): Unit = {
-    spark.sql("FROM events")
+    spark.sql("SELECT * FROM events")
+    spark.sql("""  SELECT * from events e WHERE e.id > 1 ORDER BY id""")
+    spark.sql("\tSELECT * FROM events")
+    // Not SELECT *: reported as FromWithoutSelectDetect.Manual and left as written.
+    spark.sql("FROM events GROUP BY id")
     // Hive's FROM-first forms still run on 3.5.5
     spark.sql("from events select id")
     spark.sql("FROM events INSERT INTO TABLE t SELECT id")

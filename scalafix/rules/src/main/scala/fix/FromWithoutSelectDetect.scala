@@ -24,12 +24,19 @@ import scala.util.matching.Regex
  * `unparsable` segment type would fire on any construct the dialect doesn't
  * cover, not just this one.
  *
- * Detect-only. The bare form has an exact fix (`FROM t` -> `SELECT * FROM t`);
- * promoting it is TRIAGE-PLAN §3.1 in spark-migrate-cli.
+ * Tier 1 since 2026-10-13: the statement becomes `SELECT * FROM ...`. Probed on
+ * 2.4.8 and 3.5.5, the columns and rows match for `FROM t`, with WHERE,
+ * ORDER BY/LIMIT, DISTRIBUTE BY, a JOIN, LATERAL VIEW, a table alias and a
+ * subquery. Not for GROUP BY (2.4 returned zero columns there; `SELECT *` fails
+ * on 3.5.5), HAVING, WINDOW, or a `;` (2.4.8 rejected the statement anyway):
+ * those are reported as FromWithoutSelectDetect.Manual (Tier 3).
  */
 class FromWithoutSelectDetect extends SemanticRule("FromWithoutSelectDetect") {
   override val description =
-    "Flags a SQL string that is a bare FROM (`FROM t`, no SELECT), which Spark 2.4 accepted by accident and 3.0 rejects."
+    "Rewrites a SQL string that is a bare FROM (`FROM t`, no SELECT), which Spark 2.4 accepted by accident and 3.0 rejects, to SELECT * FROM t."
+
+  private val ruleId = "FromWithoutSelectDetect"
+  private val manualId = s"$ruleId.Manual"
 
   private val sqlMatcher = SymbolMatcher.normalized(
     "org.apache.spark.sql.SparkSession.sql",
@@ -39,20 +46,47 @@ class FromWithoutSelectDetect extends SemanticRule("FromWithoutSelectDetect") {
   // Anchored at the start of the trimmed statement. `(?i)` because SQL keywords
   // are case-insensitive; `\b` so a table or CTE actually named e.g. `fromage`
   // can't trip it. The lookahead leaves Hive's FROM-first forms alone: each has a SELECT.
-  private val leadingFrom: Regex = """(?is)\A\s*FROM\b(?!.*\bSELECT\b).*""".r
+  private val leadingFrom: Regex = FromWithoutSelectDetect.leadingFrom
+  // Clauses whose meaning without a SELECT is not SELECT *.
+  private val notStar: Regex = """(?is).*(\bGROUP\s+BY\b|\bHAVING\b|\bWINDOW\b|;).*""".r
+  // The FROM keyword in the literal's source text: after the opening quotes and any
+  // whitespace, written raw or as an escape (\n, \t, \r).
+  private val fromInSource: Regex = """\A(\"\"\"|\")(\s|\\[ntr])*(?i)from\b""".r
+
+  private val explanation =
+    "This SQL statement is a bare FROM with no SELECT. Spark 2.4 and below accepted `FROM t` by accident (as SELECT *); " +
+      "Spark 3.0 rejects it with a parse error."
 
   override def fix(implicit doc: SemanticDocument): Patch = {
     doc.tree.collect {
       case Term.Apply(sqlMatcher(_), List(lit @ Lit.String(sql))) if leadingFrom.findFirstIn(sql).isDefined =>
-        RuleFinding.report(
-          RuleChange(
-            "FromWithoutSelectDetect",
-            "This SQL statement is a bare FROM with no SELECT. Spark 2.4 and below accepted `FROM t` by accident; " +
-              "Spark 3.0 rejects it with a parse error.",
-            "No auto-rewrite; restate it as `SELECT * FROM t`.",
-            lit
-          )
-        )
+        val source = lit.syntax
+        fromInSource.findFirstMatchIn(source) match {
+          case Some(m) if notStar.findFirstIn(sql).isEmpty =>
+            val at = m.end - "from".length
+            val rewritten = source.substring(0, at) + "SELECT * " + source.substring(at)
+            RuleFinding.report(
+              RuleChange(ruleId, explanation, s"Rewrote to $rewritten, which is what 2.4 ran.", lit),
+              Patch.replaceTree(lit, rewritten)
+            )
+          case _ =>
+            RuleFinding.report(
+              RuleChange(
+                manualId,
+                explanation,
+                "Not rewritten: with GROUP BY, HAVING or WINDOW a bare FROM is not the same as SELECT * (2.4 returned no " +
+                  "columns for a FROM ... GROUP BY), and a statement with `;` already failed on 2.4. Add the SELECT list you mean.",
+                lit
+              )
+            )
+        }
     }.asPatch
   }
+}
+
+object FromWithoutSelectDetect {
+  /** A bare FROM: a leading `FROM` with no SELECT after it. Shared with
+   * SparkSQLCallExternal, which leaves such a literal to this rule rather than
+   * also reporting it as unparseable. */
+  val leadingFrom: Regex = """(?is)\A\s*FROM\b(?!.*\bSELECT\b).*""".r
 }

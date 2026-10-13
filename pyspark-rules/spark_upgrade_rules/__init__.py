@@ -55,6 +55,7 @@ from spark_upgrade_rules.pandas_on_spark_rules import (
 from spark_upgrade_rules.pyspark_api_rules import MlSharedParamSetters, RemovedPySparkApi, RowKwargsFieldOrder
 from spark_upgrade_rules.pyspark_guide_rules import ArrayTypeSchemaInference, NamedtupleCloudpickle
 from spark_upgrade_rules.sql import extract_sql
+from spark_upgrade_rules.star_import_rules import StarImportShadowsFilter
 
 __all__ = ["detect", "detector_ids", "extract_sql", "fix", "fixer_ids", "transformers"]
 
@@ -90,6 +91,8 @@ DETECTORS = [
     # rewrites. MlSharedParamSetters adds lines, so it rewrites last.
     RowKwargsFieldOrder,
     RemovedPySparkApi,
+    # 3.5.5's star import of pyspark.sql.functions binds names 2.4.8's did not.
+    StarImportShadowsFilter,
     # Koalas -> pandas API on Spark, then the two changes the port reaches; the
     # port runs first, so codegen's later rules see pyspark.pandas.
     KoalasToPandasOnSpark,
