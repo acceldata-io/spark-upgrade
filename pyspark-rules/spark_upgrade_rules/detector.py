@@ -75,10 +75,11 @@ class Rule:
         self.found: list[dict] = []
 
     def report(self, node: cst.CSTNode, message: str, confidence: str | None = None, tier: int | None = None,
-               fix: str | None = None) -> None:
+               fix: str | None = None, rule_id: str | None = None) -> None:
         """`tier` overrides the registry's for this site; `fix` is the rewrite
-        codegen makes here, shown in the report."""
-        finding = {"rule": self.rule_id, "line": self.get_metadata(PositionProvider, node).start.line, "message": message}
+        codegen makes here, shown in the report; `rule_id` reports the site
+        under another id the rule owns (`AddMonthsSnapDetect.Manual`)."""
+        finding = {"rule": rule_id or self.rule_id, "line": self.get_metadata(PositionProvider, node).start.line, "message": message}
         if confidence:
             finding["confidence"] = confidence
         if tier is not None:

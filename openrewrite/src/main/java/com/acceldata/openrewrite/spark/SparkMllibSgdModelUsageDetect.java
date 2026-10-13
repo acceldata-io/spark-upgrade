@@ -14,8 +14,12 @@ import java.util.List;
  * Java-side rule closing a 2026-09-29 coverage-review gap against the MLlib
  * migration guide: the SGD-optimizer-based model classes -- {@code
  * LogisticRegressionWithSGD}, {@code LinearRegressionWithSGD}, {@code
- * RidgeRegressionWithSGD}, {@code LassoWithSGD} -- are removed in Spark
- * 3.0 in favor of their {@code spark.ml} equivalents (e.g. {@code
+ * RidgeRegressionWithSGD}, {@code LassoWithSGD} -- lose their static
+ * {@code train(...)} methods and their public no-arg constructor in Spark
+ * 3.0, so user code can no longer create or train one. The classes themselves
+ * remain with only the 4-argument constructor, which is {@code private[mllib]}
+ * in Scala ({@code javap} 2.4.8 vs 3.5.5, 2026-10-13). The replacements are
+ * the {@code spark.ml} estimators (e.g. {@code
  * org.apache.spark.ml.classification.LogisticRegression}).
  *
  * <p>Matched on the import statement's own printed text ({@link
@@ -38,13 +42,14 @@ public class SparkMllibSgdModelUsageDetect extends Recipe {
 
     @Override
     public String getDisplayName() {
-        return "Detect a removed SGD-based MLlib model class";
+        return "Detect use of an SGD-based MLlib algorithm class";
     }
 
     @Override
     public String getDescription() {
-        return "LogisticRegressionWithSGD/LinearRegressionWithSGD/RidgeRegressionWithSGD/LassoWithSGD are " +
-                "removed in Spark 3.0; migrate to the corresponding spark.ml Estimator.";
+        return "LogisticRegressionWithSGD/LinearRegressionWithSGD/RidgeRegressionWithSGD/LassoWithSGD lose their " +
+                "static train(...) methods and public no-arg constructor in Spark 3.0; migrate to the corresponding " +
+                "spark.ml Estimator.";
     }
 
     @Override
@@ -56,7 +61,8 @@ public class SparkMllibSgdModelUsageDetect extends Recipe {
                 String typeName = i.getTypeName();
                 if (typeName != null && SGD_MODEL_FQNS.contains(typeName)) {
                     return SearchResult.found(i,
-                            typeName + " is removed in Spark 3.0 -- migrate to its spark.ml equivalent.");
+                            typeName + "'s train(...) methods and no-arg constructor are removed in Spark 3.0 -- " +
+                                    "migrate to its spark.ml equivalent.");
                 }
                 return i;
             }

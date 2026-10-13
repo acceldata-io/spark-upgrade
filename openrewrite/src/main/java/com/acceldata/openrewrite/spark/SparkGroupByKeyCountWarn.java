@@ -9,34 +9,39 @@ import org.openrewrite.java.tree.J;
 import org.openrewrite.marker.SearchResult;
 
 /**
- * Java-side counterpart to the Scalafix {@code GroupByKeyWarn} rule:
- * {@code Dataset#groupByKey}'s grouping attribute is named {@code "value"}
- * for a non-struct key in 2.4, {@code "key"} from Spark 3.0 (preserved under
- * {@code spark.sql.legacy.dataset.nameNonStructGroupingKeyAsValue}).
- * Deliberately fuzzy/Tier 3, exactly like the Scala rule: flags every
- * {@code groupByKey} call regardless of whether the key type is actually
- * non-struct, since that needs type inference this rule doesn't do. Both
- * Java-friendly {@code groupByKey} overloads
- * ({@code MapFunction}-based and {@code Function1}-based) verified present
- * in the real {@code spark-sql_2.11-2.4.8.jar} via {@code javap}
- * (2026-09-24).
+ * Java-side counterpart to the Scalafix {@code GroupByKeyWarn} rule: for a
+ * non-struct key, {@code groupByKey(...).count()}, {@code .agg(...)} and
+ * {@code .reduceGroups(...)} name the key column {@code "value"} in 2.4 and
+ * {@code "key"} from Spark 3.0. All three go through Spark's {@code
+ * KeyValueGroupedDataset.aggUntyped}, which names the column ({@code
+ * reduceGroups} is an {@code agg} of a {@code ReduceAggregator}). {@code
+ * mapGroups}/{@code flatMapGroups}/{@code keys} are unaffected and not
+ * matched. Probed on 2.4.8 and 3.5.5 in Docker (2026-10-13), and the config
+ * below restores {@code "value"} for all three.
+ *
+ * <p>Tier 2: {@code spark.sql.legacy.dataset.nameNonStructGroupingKeyAsValue=true}
+ * restores 2.4's name. Still fuzzy about the key type: a struct key was never
+ * renamed, and this recipe does not resolve the key's type.
  */
 public class SparkGroupByKeyCountWarn extends Recipe {
 
-    private static final MethodMatcher MATCHER =
-            new MethodMatcher("org.apache.spark.sql.Dataset groupByKey(..)");
+    private static final MethodMatcher COUNT =
+            new MethodMatcher("org.apache.spark.sql.KeyValueGroupedDataset count()");
+    private static final MethodMatcher AGG =
+            new MethodMatcher("org.apache.spark.sql.KeyValueGroupedDataset agg(..)");
+    private static final MethodMatcher REDUCE_GROUPS =
+            new MethodMatcher("org.apache.spark.sql.KeyValueGroupedDataset reduceGroups(..)");
 
     @Override
     public String getDisplayName() {
-        return "Warn on Dataset#groupByKey's key-column naming change";
+        return "Warn on groupByKey(...).count()/agg(...)/reduceGroups(...)'s key-column naming change";
     }
 
     @Override
     public String getDescription() {
-        return "In Spark 2.4 and below, Dataset.groupByKey's grouped dataset names its key attribute \"value\" " +
-                "if the key is a non-struct type; since Spark 3.0 it's named \"key\" instead (preserved under " +
-                "spark.sql.legacy.dataset.nameNonStructGroupingKeyAsValue, default false). This linter rule is " +
-                "fuzzy: it flags every groupByKey call regardless of key type.";
+        return "For a non-struct key, groupByKey(...).count(), .agg(...) and .reduceGroups(...) name the key " +
+                "column \"value\" in Spark 2.4 and \"key\" from Spark 3.0. " +
+                "spark.sql.legacy.dataset.nameNonStructGroupingKeyAsValue=true restores \"value\".";
     }
 
     @Override
@@ -45,12 +50,12 @@ public class SparkGroupByKeyCountWarn extends Recipe {
             @Override
             public J.MethodInvocation visitMethodInvocation(J.MethodInvocation method, ExecutionContext ctx) {
                 J.MethodInvocation m = super.visitMethodInvocation(method, ctx);
-                if (MATCHER.matches(m)) {
+                if (COUNT.matches(m) || AGG.matches(m) || REDUCE_GROUPS.matches(m)) {
                     return SearchResult.found(
                             m,
-                            "groupByKey's grouping attribute is named \"key\" from Spark 3.0 onward, not 2.4's " +
-                                    "\"value\", for a non-struct key. Review every \"value\" column reference derived " +
-                                    "from this pipeline."
+                            "For a non-struct key, this result's key column is named \"key\" from Spark 3.0, not " +
+                                    "2.4's \"value\"; spark.sql.legacy.dataset.nameNonStructGroupingKeyAsValue=true " +
+                                    "restores \"value\"."
                     );
                 }
                 return m;

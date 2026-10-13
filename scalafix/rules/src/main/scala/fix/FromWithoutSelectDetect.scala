@@ -7,10 +7,12 @@ import scala.meta._
 import scala.util.matching.Regex
 
 /**
- * Family K (SQL migration guide, 2.4 -> 3.0): `FROM <table>` and
- * `FROM <table> SELECT <expr>` were accepted by accident in 2.4 and below and
- * are rejected outright in 3.0. A leading `FROM` is the whole signal, which
- * makes this the highest-confidence Family K item there is.
+ * Family K (SQL migration guide, 2.4 -> 3.0): a bare `FROM <table>` was
+ * accepted by accident in 2.4 and below and is rejected outright in 3.0. Hive's
+ * FROM-first forms, `FROM t SELECT c` and `FROM t INSERT ...`, still parse and
+ * run on 3.5.5 (probed 2026-10-13: `FROM t SELECT id` returns 1), so only a
+ * leading `FROM` with no SELECT after it is flagged -- the same test the CLI's
+ * SqlLiteralLinter applies for Java and PySpark.
  *
  * Implemented Scala-side rather than as a sqlfluff plugin rule -- which is the
  * opposite of the "consolidate Family K into the plugin" direction, and needs
@@ -22,14 +24,12 @@ import scala.util.matching.Regex
  * `unparsable` segment type would fire on any construct the dialect doesn't
  * cover, not just this one.
  *
- * Detect-only. The bare form has an exact fix (`FROM t` -> `SELECT * FROM t`),
- * but the `FROM t SELECT a` form needs a clause reorder, and a rule that
- * auto-rewrites one shape while silently leaving the other is worse than one
- * that reports both.
+ * Detect-only. The bare form has an exact fix (`FROM t` -> `SELECT * FROM t`);
+ * promoting it is TRIAGE-PLAN §3.1 in spark-migrate-cli.
  */
 class FromWithoutSelectDetect extends SemanticRule("FromWithoutSelectDetect") {
   override val description =
-    "Flags a SQL string starting with FROM (`FROM t`, `FROM t SELECT c`), which Spark 2.4 accepted by accident and 3.0 rejects."
+    "Flags a SQL string that is a bare FROM (`FROM t`, no SELECT), which Spark 2.4 accepted by accident and 3.0 rejects."
 
   private val sqlMatcher = SymbolMatcher.normalized(
     "org.apache.spark.sql.SparkSession.sql",
@@ -38,8 +38,8 @@ class FromWithoutSelectDetect extends SemanticRule("FromWithoutSelectDetect") {
 
   // Anchored at the start of the trimmed statement. `(?i)` because SQL keywords
   // are case-insensitive; `\b` so a table or CTE actually named e.g. `fromage`
-  // can't trip it.
-  private val leadingFrom: Regex = """(?is)\A\s*FROM\b.*""".r
+  // can't trip it. The lookahead leaves Hive's FROM-first forms alone: each has a SELECT.
+  private val leadingFrom: Regex = """(?is)\A\s*FROM\b(?!.*\bSELECT\b).*""".r
 
   override def fix(implicit doc: SemanticDocument): Patch = {
     doc.tree.collect {
@@ -47,9 +47,9 @@ class FromWithoutSelectDetect extends SemanticRule("FromWithoutSelectDetect") {
         RuleFinding.report(
           RuleChange(
             "FromWithoutSelectDetect",
-            "This SQL statement starts with FROM. Spark 2.4 and below accepted `FROM t` / `FROM t SELECT c` by " +
-              "accident; Spark 3.0 rejects both with a parse error.",
-            "No auto-rewrite; restate as `SELECT * FROM t` (bare form) or `SELECT c FROM t` (FROM-first form).",
+            "This SQL statement is a bare FROM with no SELECT. Spark 2.4 and below accepted `FROM t` by accident; " +
+              "Spark 3.0 rejects it with a parse error.",
+            "No auto-rewrite; restate it as `SELECT * FROM t`.",
             lit
           )
         )

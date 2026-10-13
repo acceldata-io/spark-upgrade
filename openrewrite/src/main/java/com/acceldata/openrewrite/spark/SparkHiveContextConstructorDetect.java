@@ -13,7 +13,8 @@ import java.util.List;
 
 /**
  * Java-side counterpart to the Scalafix {@code MigrateHiveContext} rule:
- * {@code HiveContext} is removed in Spark 3.x; migrate to
+ * {@code HiveContext} is deprecated since 2.0 (all three constructors still
+ * exist in 3.5.5, {@code javap} 2026-10-13); migrate to
  * {@code SparkSession.builder().enableHiveSupport().getOrCreate()}. All
  * three constructors verified present in the real {@code
  * spark-hive_2.11-2.4.8.jar} via {@code javap} (2026-09-24).
@@ -38,7 +39,8 @@ public class SparkHiveContextConstructorDetect extends Recipe {
 
     @Override
     public String getDescription() {
-        return "HiveContext is removed in Spark 3.x; migrate to SparkSession.builder().enableHiveSupport().getOrCreate().";
+        return "HiveContext is deprecated (it still exists in Spark 3.5.5); migrate to " +
+                "SparkSession.builder().enableHiveSupport().getOrCreate().";
     }
 
     @Override
@@ -51,7 +53,7 @@ public class SparkHiveContextConstructorDetect extends Recipe {
                     if (matcher.matches(n)) {
                         return SearchResult.found(
                                 n,
-                                "HiveContext is removed in Spark 3.x; migrate to " +
+                                "HiveContext is deprecated (it still exists in Spark 3.5.5); migrate to " +
                                         "SparkSession.builder().enableHiveSupport().getOrCreate()."
                         );
                     }

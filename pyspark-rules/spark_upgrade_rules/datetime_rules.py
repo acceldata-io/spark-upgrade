@@ -13,9 +13,10 @@ import re
 import zoneinfo
 
 import libcst as cst
+from libcst.helpers import get_full_name_for_node
 
 from spark_upgrade_rules import _cst
-from spark_upgrade_rules.detector import Detector
+from spark_upgrade_rules.detector import Detector, Fixer
 
 # ---- datetime patterns --------------------------------------------------------
 
@@ -181,22 +182,164 @@ class DateTimeFormatPatternValidator(Detector):
                     confidence)
 
 
-class AddMonthsSnapDetect(Detector):
+_ADD_MONTHS_SQL = re.compile(r"(?i)\badd_months\s*\(")
+_SNAP = ("Spark 3.0 no longer snaps the result to the last day of the month when the input is a month-end date "
+         "(2019-02-28 + 1 month is 2019-03-28, not 2019-03-31). Silent, data-dependent; no config restores it.")
+# The functions the rewrite calls beside add_months itself.
+_SNAP_HELPERS = ("last_day", "to_date", "when")
+
+
+class AddMonthsSnapDetect(Fixer):
+    """`add_months(d, n)`: 2.4 returned the last day of the target month when
+    `d` was the last day of its month; 3.0 does not. Rewritten to
+    `when(to_date(d) == last_day(d), last_day(add_months(d, n))).otherwise(add_months(d, n))`
+    -- probed on 3.5.5 against 2.4.8 for dates, timestamps, strings, Feb 29,
+    ordinary days and null, n = 1 and -1: the same values. The rewrite renames
+    an unaliased result column, so it is made only where the generated name
+    is discarded: under .alias/.name, as withColumn's value, or in a
+    filter/where, orderBy/sort or join condition. The rewrite repeats
+    `d` and `n`, so only where repeating them cannot change what they are: `d`
+    a column name, `col("x")`, `df.x`, `df["x"]`, a plain name, or
+    `to_date`/`to_timestamp` of one; `n` an int literal or a plain name. Other
+    calls, named outputs, and add_months in SQL text, are reported as
+    `AddMonthsSnapDetect.Manual`."""
+
     rule_id = "AddMonthsSnapDetect"
+    MANUAL = "AddMonthsSnapDetect.Manual"
+
+    def __init__(self, ctx) -> None:
+        super().__init__(ctx)
+        # A bare `add_months(...)` needs the helpers as bare names too: already
+        # imported from pyspark.sql.functions (or by its `*`), or added to the
+        # first module-level import from it -- unless the file binds the name
+        # to something else.
+        self.import_index: int | None = None
+        imported: set[str] = set()
+        for i, stmt in enumerate(ctx.module.body):
+            for small in stmt.body if isinstance(stmt, cst.SimpleStatementLine) else ():
+                if isinstance(small, cst.ImportFrom) and small.module is not None and \
+                        get_full_name_for_node(small.module) == _cst.FUNCTIONS and not isinstance(small.names, cst.ImportStar):
+                    if self.import_index is None:
+                        self.import_index = i
+                    imported.update(a.name.value for a in small.names if a.asname is None and isinstance(a.name, cst.Name))
+        bound = ctx.bindings.count
+        self.bare_ok = all((h in imported and bound.get(h) == 1) or
+                           (h not in bound and (ctx.star_functions or self.import_index is not None)) for h in _SNAP_HELPERS)
+        self.to_import = [] if ctx.star_functions else [h for h in _SNAP_HELPERS if h not in bound]
+        self.bare_rewritten = False
+        # Expressions whose auto-generated column name is discarded, and how
+        # deep inside one the visit is: the rewrite changes that name
+        # (add_months(d, 1) becomes CASE WHEN ...), so it is made only there.
+        self.unnamed: set[int] = set()
+        self.unnamed_depth = 0
+
+    def on_visit(self, node: cst.CSTNode) -> bool:
+        if id(node) in self.unnamed:
+            self.unnamed_depth += 1
+        return super().on_visit(node)
+
+    def on_leave(self, original_node: cst.CSTNode, updated_node: cst.CSTNode):
+        result = super().on_leave(original_node, updated_node)
+        if id(original_node) in self.unnamed:
+            self.unnamed_depth -= 1
+        return result
 
     def visit_Call(self, node: cst.Call) -> None:
-        in_sql = any(re.search(r"(?i)\badd_months\s*\(", sql) for sql in self.sql_text_args(node))
-        if self.function(node, "add_months") or in_sql:
-            self._report(node, in_sql)
+        if any(_ADD_MONTHS_SQL.search(sql) for sql in self.sql_text_args(node)):
+            self._manual(node, "add_months(...) in SQL text")
+        # Parents are visited before their arguments, so a scope is marked
+        # before anything inside it is reached.
+        name = _cst.method_name(node)
+        if name in ("alias", "name"):
+            self.unnamed.add(id(_cst.receiver(node)))
+        elif name == "withColumn":
+            self.unnamed.add(id(_cst.argument(node, 1, "col")))
+        elif name in ("filter", "where"):
+            self.unnamed.add(id(_cst.argument(node, 0, "condition")))
+        elif name in ("orderBy", "sort", "sortWithinPartitions"):
+            self.unnamed.update(id(a) for a in _cst.positional(node))
+        elif name == "join":
+            self.unnamed.add(id(_cst.argument(node, 1, "on")))
 
-    def check_sql(self, node: cst.CSTNode, sql: str) -> None:
-        if re.search(r"(?i)\badd_months\s*\(", sql):
-            self._report(node, True)
+    def leave_Call(self, original_node: cst.Call, updated_node: cst.Call) -> cst.BaseExpression:
+        if not self.function(original_node, "add_months"):
+            return updated_node
+        start, months = _cst.argument(original_node, 0, "start"), _cst.argument(original_node, 1, "months")
+        func = original_node.func
+        prefix = (self.ctx.module.code_for_node(func.value) + ".") if isinstance(func, cst.Attribute) else \
+            ("" if self.bare_ok else None)
+        if prefix is None or len(original_node.args) != 2 or _cst.has_star_args(original_node) or \
+                not self._safe_date(start) or not self._safe_months(months):
+            self._manual(original_node, "add_months(...) with arguments the rewrite cannot repeat safely (an expression "
+                                        "other than a column, a name or to_date/to_timestamp of one)")
+            return updated_node
+        d, n = self.ctx.module.code_for_node(start), self.ctx.module.code_for_node(months)
+        shifted = f"{self.ctx.module.code_for_node(func)}({d}, {n})"
+        snap = f"{prefix}when({prefix}to_date({d}) == {prefix}last_day({d}), {prefix}last_day({shifted})).otherwise({shifted})"
+        if not self.unnamed_depth:
+            self.report(original_node, f"add_months(...) whose result keeps its generated column name: {_SNAP} The rewrite "
+                                       "that restores 2.4's values would rename the column (add_months(...) becomes CASE "
+                                       f"WHEN ...), so it is not made here. Use {snap}, with .alias(...) of the current "
+                                       "name if anything reads the column by name.", tier=3, rule_id=self.MANUAL)
+            return updated_node
+        new = cst.parse_expression(snap)
+        if not prefix:
+            self.bare_rewritten = True
+        return self.rewrite(original_node, new.with_changes(lpar=updated_node.lpar, rpar=updated_node.rpar),
+                            f"add_months(...): {_SNAP} Rewritten to keep 2.4's result: where the input is the last day of "
+                            "its month, the result is the last day of the target month. If the job never wanted the snap, "
+                            "revert this change.")
 
-    def _report(self, node: cst.CSTNode, in_sql: bool) -> None:
-        self.report(node, "add_months(...)" + (" in SQL text" if in_sql else "") + ": Spark 3.0 no longer snaps the result "
-                    "to the last day of the month when the input is a month-end date (2019-02-28 + 1 month is 2019-03-28, "
-                    "not 2019-03-31). Silent, data-dependent; no config restores it.")
+    def leave_Module(self, original_node: cst.Module, updated_node: cst.Module) -> cst.Module:
+        for node, sql in self.ctx.sql_definitions:
+            if _ADD_MONTHS_SQL.search(sql):
+                self._manual(node, "add_months(...) in SQL text")
+        if not (self.bare_rewritten and self.to_import):
+            return updated_node
+        stmt = updated_node.body[self.import_index]
+        imp = next(s for s in stmt.body if isinstance(s, cst.ImportFrom) and not isinstance(s.names, cst.ImportStar)
+                   and get_full_name_for_node(s.module) == _cst.FUNCTIONS)
+        names = list(imp.names)
+        trailing = names[-1].comma  # keep a trailing comma's layout for the added names
+        added = [cst.ImportAlias(name=cst.Name(h), comma=trailing) for h in self.to_import]
+        if not isinstance(trailing, cst.Comma):
+            names[-1] = names[-1].with_changes(comma=cst.MaybeSentinel.DEFAULT)
+        new_imp = imp.with_changes(names=names + added)
+        body = list(updated_node.body)
+        body[self.import_index] = stmt.with_changes(body=[new_imp if s is imp else s for s in stmt.body])
+        return updated_node.with_changes(body=body)
+
+    def _manual(self, node: cst.CSTNode, what: str) -> None:
+        self.report(node, f"{what}: {_SNAP} Where the input can be a month-end date and 2.4's result is wanted, write "
+                          "when(to_date(d) == last_day(d), last_day(add_months(d, n))).otherwise(add_months(d, n)).",
+                    tier=3, rule_id=self.MANUAL)
+
+    def _column(self, node: cst.BaseExpression | None) -> bool:
+        """A column named without side effects: "x", col("x"), df.x, df["x"], or a plain name."""
+        if _cst.string_value(node) is not None:
+            return True
+        if isinstance(node, cst.Name):
+            return node.value not in ("True", "False", "None")
+        if isinstance(node, cst.Attribute):
+            return isinstance(node.value, cst.Name)
+        if isinstance(node, cst.Subscript):
+            return isinstance(node.value, cst.Name) and len(node.slice) == 1 and \
+                isinstance(node.slice[0].slice, cst.Index) and _cst.string_value(node.slice[0].slice.value) is not None
+        if isinstance(node, cst.Call) and self.function(node, "col", "column"):
+            return len(node.args) == 1 and node.args[0].keyword is None and not node.args[0].star and \
+                _cst.string_value(node.args[0].value) is not None
+        return False
+
+    def _safe_date(self, node: cst.BaseExpression | None) -> bool:
+        if isinstance(node, cst.Call) and self.function(node, "to_date", "to_timestamp"):
+            args = node.args
+            return 1 <= len(args) <= 2 and all(a.keyword is None and not a.star for a in args) and \
+                self._column(args[0].value) and (len(args) == 1 or _cst.string_value(args[1].value) is not None)
+        return self._column(node)
+
+    @staticmethod
+    def _safe_months(node: cst.BaseExpression | None) -> bool:
+        return _cst.int_value(node) is not None or (isinstance(node, cst.Name) and node.value not in ("True", "False", "None"))
 
 
 # ---- time zones --------------------------------------------------------------

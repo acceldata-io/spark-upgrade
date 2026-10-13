@@ -8,7 +8,8 @@ import scala.meta._
 /**
  * Tier 3 detector (design review Part 2 Family F): duplicate map keys throw
  * `RuntimeException` under Spark 3.0's default `spark.sql.mapKeyDedupPolicy`
- * (was silently last-write-wins in 2.4). That config is generally Class B
+ * (2.4 kept both entries: a lookup returned the first value, collect() the
+ * last; probed on 2.4.8). That config is generally Class B
  * (data-dependent -- LegacyConfigRegistry's classB entry) because whether
  * duplicates occur normally depends on runtime data. But when both keys are
  * literal values written directly in a `map(...)`/`create_map(...)` call,
@@ -22,7 +23,7 @@ import scala.meta._
  */
 class DuplicateMapKeyLiteralDetect extends SemanticRule("DuplicateMapKeyLiteralDetect") {
   override val description =
-    "Flags map(...)/create_map(...) calls with a duplicate literal key, which Spark 3.0 throws on by default instead of silently keeping the last value."
+    "Flags map(...)/create_map(...) calls with a duplicate literal key, which Spark 3.0 throws on. 2.4 kept both: a lookup returned the first value, collect() the last. No config restores that (mapKeyDedupPolicy=LAST_WIN gives the last everywhere), so remove the duplicate you do not mean."
 
   private val mapFunMatcher = SymbolMatcher.normalized(
     "org.apache.spark.sql.functions.map",
@@ -45,8 +46,9 @@ class DuplicateMapKeyLiteralDetect extends SemanticRule("DuplicateMapKeyLiteralD
           RuleFinding.report(
             RuleChange(
               "DuplicateMapKeyLiteralDetect",
-              s"map(...)/create_map(...) has duplicate literal key(s): ${dupes.mkString(", ")}. Spark 3.0 throws RuntimeException on duplicate map keys by default (spark.sql.mapKeyDedupPolicy=EXCEPTION) instead of 2.4's silent last-write-wins.",
-              "No auto-rewrite; remove the duplicate key, or set spark.sql.mapKeyDedupPolicy=LAST_WIN to keep 2.4's behavior.",
+              s"map(...)/create_map(...) has duplicate literal key(s): ${dupes.mkString(", ")}. Spark 3.0 throws RuntimeException on duplicate map keys by default (spark.sql.mapKeyDedupPolicy=EXCEPTION). " +
+                "2.4 kept both entries: a lookup returned the first value, collect() the last.",
+              "No auto-rewrite and no config restores 2.4 (mapKeyDedupPolicy=LAST_WIN gives the last value everywhere); remove the duplicate key you do not mean.",
               t
             )
           )

@@ -31,7 +31,7 @@ class SparkAnalysisExceptionPlanUsageDetectTest implements RewriteTest {
 
                         class QueryRunner {
                             void logFailure(AnalysisException e) {
-                                System.out.println(/*~~(AnalysisException.plan moves to EnhancedAnalysisException in Spark 3.5; this call stops compiling unless the exception is narrowed to that type first.)~~>*/e.plan());
+                                System.out.println(/*~~(AnalysisException.plan() moves to ExtendedAnalysisException in Spark 3.5; this call stops compiling unless the exception is narrowed to that type first.)~~>*/e.plan());
                             }
                         }
                         """

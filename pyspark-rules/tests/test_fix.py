@@ -139,6 +139,98 @@ class RemovedApiTest(unittest.TestCase):
         """
         self.assertEqual([x[:2] for x in analyze(code, self.rule)], [(3, 3), (5, 3), (6, 3), (7, 3)])
 
+    def test_moved_names_are_reported_with_their_new_import(self):
+        # Checked against 3.5.5: both live on, in pyspark.ml.wrapper and
+        # pyspark.errors.exceptions.captured; neither at its 2.4 path.
+        code = """
+            from pyspark.ml.util import JavaPredictionModel
+            from pyspark.sql.utils import capture_sql_exception
+        """
+        module = cst.parse_module(HEADER + textwrap.dedent(code))
+        found = [f for f in detect(module, {self.rule})[0]]
+        self.assertEqual([(f["line"] - 1, f["tier"]) for f in found], [(2, 3), (3, 3)])
+        self.assertIn("from pyspark.ml.wrapper import JavaPredictionModel", found[0]["message"])
+        self.assertIn("from pyspark.errors.exceptions.captured import capture_sql_exception", found[1]["message"])
+        self.assertNotIn("removed", found[0]["message"] + found[1]["message"])
+
+
+class AddMonthsSnapTest(unittest.TestCase):
+    """Each rewritten shape was run on 3.5.5 and matched plain add_months on
+    2.4.8 for 2019-02-28, '2019-04-30 10:00:00', 2020-02-29, 2019-02-15 and
+    null, with n = 1 and -1 (spark-migrate-cli PYSPARK.md SS2.7)."""
+
+    rule = "AddMonthsSnapDetect"
+
+    def _found(self, code):
+        module = cst.parse_module(HEADER + textwrap.dedent(code))
+        found, _ = detect(module, {self.rule})
+        return [(f["line"] - 1, f["rule"], f.get("tier")) for f in found]
+
+    def test_safe_shapes_are_rewritten_with_the_calls_own_prefix(self):
+        code = """
+            a = df.withColumn("a", F.add_months("d", 1))
+            b = df.select(F.add_months(F.col("d"), -1).alias("b"))
+            c = df.filter(F.add_months(df.d, n) > F.lit("2020-01-01"))
+            e = df.select((F.add_months(df["d"], 1) == x).name("e"))
+            f = df.orderBy(F.add_months(F.to_timestamp(d, "yyyy-MM-dd HH:mm"), 1))
+        """
+        self.assertEqual(self._found(code), [(i, self.rule, 1) for i in range(2, 7)])
+        out = rewritten(code, self.rule)
+        self.assertIn('a = df.withColumn("a", F.when(F.to_date("d") == F.last_day("d"), F.last_day(F.add_months("d", 1)))'
+                      '.otherwise(F.add_months("d", 1)))', out)
+        self.assertIn('.otherwise(F.add_months(F.col("d"), -1)).alias("b")', out)
+        self.assertIn("F.to_date(df.d) == F.last_day(df.d)", out)
+        self.assertIn('F.to_date(df["d"])', out)
+        self.assertIn('F.to_date(F.to_timestamp(d, "yyyy-MM-dd HH:mm"))', out)
+
+    def test_a_generated_column_name_is_kept(self):
+        # The rewrite renames an unaliased column (add_months(d, 1) -> CASE WHEN ...).
+        code = """
+            a = df.select(F.add_months("d", 1))
+            b = F.add_months("d", 1)
+            c = df.select(F.add_months("d", 1).cast("date"))
+        """
+        manual = "AddMonthsSnapDetect.Manual"
+        self.assertEqual(self._found(code), [(2, manual, 3), (3, manual, 3), (4, manual, 3)])
+        self.assertEqual(rewritten(code, self.rule), textwrap.dedent(code))
+
+    def test_bare_import_is_extended(self):
+        code = """
+            from pyspark.sql.functions import add_months, col
+            x = df.select(add_months(col("d"), 1).alias("x"))
+        """
+        out = rewritten(code, self.rule)
+        self.assertIn("from pyspark.sql.functions import add_months, col, last_day, to_date, when\n", out)
+        self.assertIn('when(to_date(col("d")) == last_day(col("d")), last_day(add_months(col("d"), 1)))'
+                      '.otherwise(add_months(col("d"), 1)).alias("x")', out)
+        already = """
+            from pyspark.sql.functions import add_months, when, to_date, last_day
+            x = df.withColumn("x", add_months("d", 1))
+        """
+        self.assertIn("import add_months, when, to_date, last_day\n", rewritten(already, self.rule))
+        star = """
+            from pyspark.sql.functions import *
+            x = df.withColumn("x", add_months("d", 1))
+        """
+        self.assertIn("from pyspark.sql.functions import *\nx = df.withColumn(\"x\", when(", rewritten(star, self.rule))
+
+    def test_unsafe_shapes_are_reported_manual(self):
+        code = """
+            from pyspark.sql.functions import add_months
+            when = "2020-01-01"
+            a = df.withColumn("a", F.add_months(F.expr("d + 1"), 1))
+            b = df.withColumn("b", F.add_months("d", months()))
+            c = df.withColumn("c", F.add_months(F.add_months("d", 1), 1))
+            e = df.withColumn("e", add_months("d", 1))
+            f = F.expr("add_months(d, 1)")
+        """
+        manual = "AddMonthsSnapDetect.Manual"
+        self.assertEqual(self._found(code), [(4, manual, 3), (5, manual, 3), (6, self.rule, 1), (6, manual, 3),
+                                             (7, manual, 3), (8, manual, 3)])
+        out = rewritten(code, self.rule)
+        self.assertIn('add_months("d", 1))\n', out, "a bare `when` bound to something else is not shadowed")
+        self.assertIn('F.add_months(F.when(', out, "the inner call is rewritten, the outer reported")
+
 
 class ReaderWriterFixTest(unittest.TestCase):
     def test_path_option_dropped_only_where_one_path_is_certain(self):

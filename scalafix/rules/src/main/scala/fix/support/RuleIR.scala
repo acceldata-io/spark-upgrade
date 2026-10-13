@@ -52,26 +52,15 @@ object RuleRegistry {
       docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
       defaultConfidence = "high"
     ),
-    RuleMeta(
-      ruleId = "GroupByKeyRenameColumnQQ",
-      tier = 1,
-      description = "Since Spark 3.0 Dataset.groupByKey(...).count() names the grouping column 'key' instead of 'value'; column references in the same file are rewritten to match.",
-      docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
-      defaultConfidence = "medium"
-    ),
-    RuleMeta(
-      ruleId = "GroupByKeyRewrite",
-      tier = 1,
-      description = "Rewrites literal 'value' column references following a groupByKey(...).toDS().count() chain to 'key', matching the Spark 3.0 column-naming change.",
-      docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
-      defaultConfidence = "medium"
-    ),
+    // Tier 2: the config, not a rename of "value" references, restores 2.4's
+    // column name (probed: groupByKey(identity).count() gives value,count(1)
+    // on 2.4.8 and on 3.5.5 with the config; struct keys are unaffected).
     RuleMeta(
       ruleId = "GroupByKeyWarn",
-      tier = 3,
-      description = "Flags Dataset.groupByKey(...).count() usage whose 'value'/'key' column naming behavior changed in Spark 3.0; the flagged pipeline needs manual review to confirm every reference was caught.",
+      tier = 2,
+      description = "Flags .count()/.agg(...)/.reduceGroups(...) on the result of Dataset.groupByKey. For a non-struct key Spark 3.0 names the grouping column 'key' instead of 2.4's 'value'; spark.sql.legacy.dataset.nameNonStructGroupingKeyAsValue is injected and keeps 2.4's 'value'.",
       docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
-      defaultConfidence = "low"
+      defaultConfidence = "medium"
     ),
     RuleMeta(
       ruleId = "UnionRewrite",
@@ -198,10 +187,13 @@ object RuleRegistry {
     // spark.sql.legacy.* config in LegacyConfigRegistry that its firing
     // makes eligible for Phase B's submit-conf injection. Detection-only --
     // no code rewrite -- by definition of Tier 2 in the tier taxonomy.
+    // Tier 3, never config-injected: probed, udf((x: Int) => x + 1, IntegerType)
+    // on [1, null] gives [2, null] on 2.4.8 but [2, 1] on 3.5.5 with
+    // spark.sql.legacy.allowUntypedScalaUDF=true, and that config is job-global.
     RuleMeta(
       ruleId = "UntypedScalaUDFDetect",
-      tier = 2,
-      description = "Flags the deprecated 2-arg functions.udf(AnyRef, DataType) form, which also changed null-handling semantics in Spark 3.0. Feeds spark.sql.legacy.allowUntypedScalaUDF.",
+      tier = 3,
+      description = "Flags the untyped functions.udf(AnyRef, DataType) form, which Spark 3.x rejects at udf creation. Rewrite it as a typed UDF (udf((x: Int) => x + 1) / udf[Int, Int](...)); do not set spark.sql.legacy.allowUntypedScalaUDF, which silently turns a null input into 0 for primitive parameters.",
       docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
       defaultConfidence = "high"
     ),
@@ -264,7 +256,7 @@ object RuleRegistry {
     RuleMeta(
       ruleId = "CountStarWithTableIdentDetect",
       tier = 2,
-      description = "Flags count(tbl.*) in SQL text, which Spark 3.0's parser rejects -- only bare count(*) is allowed. Feeds spark.sql.legacy.allowStarWithSingleTableIdentifierInCount.",
+      description = "Flags count(tbl.*) in SQL text, which Spark 3.0 rejects. In 2.4 it counts rows where every column of tbl is non-null, NOT all rows, so count(*) is not equivalent. spark.sql.legacy.allowStarWithSingleTableIdentifierInCount is injected and restores 2.4 exactly; to drop it, rewrite to count(c1, c2, ...) listing tbl's columns.",
       docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
       defaultConfidence = "high"
     ),
@@ -279,17 +271,28 @@ object RuleRegistry {
     // codebase could contain the patterns those design-review items describe
     // -- deliberately not implemented as detectors for that reason, not
     // overlooked.
+    // Tier 1 since 2026-10-13: the rewrite uses only functions 2.4 has and was
+    // probed exact on 2.4.8 and 3.5.5 (dates, timestamps, strings, Feb 29,
+    // ordinary days, null). A call whose arguments are not safe to repeat is
+    // reported as AddMonthsSnapDetect.Manual (Tier 3) and left as written.
     RuleMeta(
       ruleId = "AddMonthsSnapDetect",
-      tier = 3,
-      description = "Flags add_months(...) call sites -- Spark 3.0 no longer reliably snaps the result to the last day of the month for month-end inputs.",
+      tier = 1,
+      description = "Spark 3.0 dropped add_months' month-end snap (2.4: 2019-02-28 + 1 month -> 2019-03-31; 3.x: 2019-03-28). add_months(d, n) is rewritten to when(to_date(d) === last_day(d), last_day(add_months(d, n))).otherwise(add_months(d, n)), which gives 2.4's result on both versions. Applied only where the expression's auto-generated column name is discarded (aliased, withColumn's value, or a filter/where/orderBy/sort/join argument), since the rewrite changes that name.",
       docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
-      defaultConfidence = "low"
+      defaultConfidence = "high"
+    ),
+    RuleMeta(
+      ruleId = "AddMonthsSnapDetect.Manual",
+      tier = 3,
+      description = "Spark 3.0 dropped add_months' month-end snap, and the tool could not rewrite this call safely: its arguments are not simple enough to repeat, or the result may become a named output column whose auto-generated name the rewrite would change. Use when(to_date(d) === last_day(d), last_day(add_months(d, n))).otherwise(add_months(d, n)) to keep 2.4's result (binding complex arguments to vals d and n first), and alias it .as(\"<original name>\") if the column name matters.",
+      docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
+      defaultConfidence = "high"
     ),
     RuleMeta(
       ruleId = "DuplicateMapKeyLiteralDetect",
       tier = 3,
-      description = "Flags map(...)/create_map(...) calls with a duplicate literal key, which Spark 3.0 throws on by default instead of silently keeping the last value.",
+      description = "Flags map(...)/create_map(...) calls with a duplicate literal key, which Spark 3.0 throws on. 2.4 kept both: a lookup returned the first value, collect() the last. No config restores that (mapKeyDedupPolicy=LAST_WIN gives the last everywhere), so remove the duplicate you do not mean.",
       docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
       defaultConfidence = "high"
     ),
@@ -386,7 +389,7 @@ object RuleRegistry {
     RuleMeta(
       ruleId = "FromWithoutSelectDetect",
       tier = 3,
-      description = "Flags a SQL string starting with FROM (`FROM t`, `FROM t SELECT c`) -- accepted by accident in Spark 2.4, rejected by 3.0's parser.",
+      description = "Flags a SQL string that is a bare FROM (`FROM t`, no SELECT) -- accepted by accident in Spark 2.4, rejected by 3.0's parser. Hive's `FROM t SELECT c` still runs and is not flagged.",
       docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
       defaultConfidence = "high"
     ),
@@ -509,7 +512,7 @@ object RuleRegistry {
     RuleMeta(
       ruleId = "SparkSQLCallExternal.CTEPRECEDENCE_L010",
       tier = 2,
-      description = "sqlfluff plugin: an inner WITH shadows an outer CTE of the same name. Spark 3.0 makes this an error by default instead of silently picking one. Feeds spark.sql.legacy.ctePrecedencePolicy.",
+      description = "sqlfluff plugin: an inner WITH shadows an outer CTE of the same name. 2.4 used the OUTER definition; Spark 3.x fails the query by default. Feeds spark.sql.legacy.ctePrecedencePolicy=LEGACY, which restores 2.4's outer-wins resolution (CORRECTED would use the inner one and change the result).",
       docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
       defaultConfidence = "high"
     ),
@@ -537,7 +540,7 @@ object RuleRegistry {
     RuleMeta(
       ruleId = "CsvBomMultilineDetect",
       tier = 3,
-      description = "Flags a CSV read with multiLine=true and no explicit encoding option -- Spark 3.0 removed automatic BOM detection for CSV.",
+      description = "Flags a CSV read with multiLine=true and no explicit encoding option. A UTF-8 BOM is still skipped in Spark 3.x, but a UTF-16/UTF-32 file is no longer detected from its BOM and is misread; set the encoding option explicitly.",
       docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
       defaultConfidence = "medium"
     ),

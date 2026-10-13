@@ -43,14 +43,31 @@ class ArrayTypeSchemaInference(Detector):
 
     rule_id = "ArrayTypeSchemaInference"
 
+    def __init__(self, ctx) -> None:
+        super().__init__(ctx)
+        # Bindings of each enclosing function, innermost last: a test's
+        # `data = [...]` is bound once in its function, though many functions
+        # bind `data`.
+        self.scopes: list[_cst.Bindings] = []
+
+    def visit_FunctionDef(self, node: cst.FunctionDef) -> None:
+        bindings = _cst.Bindings()
+        node.visit(bindings)
+        self.scopes.append(bindings)
+
+    def leave_FunctionDef(self, original_node: cst.FunctionDef) -> None:
+        self.scopes.pop()
+
     def visit_Call(self, node: cst.Call) -> None:
         name = _cst.method_name(node)
         if name == "createDataFrame":
             data, schema = _cst.argument(node, 0, "data"), _cst.argument(node, 1, "schema")
         elif name == "toDF":
+            # DataFrame.toDF(*cols) renames columns; only RDD.toDF(schema,
+            # sampleRatio) infers, and it takes no `*args` and no name strings.
+            if _cst.has_star_args(node) or any(_cst.string_value(a) is not None for a in _cst.positional(node)):
+                return
             data, schema = None, _cst.argument(node, 0, "schema")
-            if any(a.star == "*" for a in node.args) or (schema is not None and self.string(schema) is not None):
-                schema = None  # toDF("a", "b") or toDF(*cols): names, still inferred
         else:
             return
         if data is None and name == "createDataFrame":
@@ -77,7 +94,10 @@ class ArrayTypeSchemaInference(Detector):
 
     def _literal_rows(self, data: cst.BaseExpression | None) -> list | None:
         if isinstance(data, cst.Name):
-            data = self.ctx.bindings.expression(data.value)
+            # The innermost function that binds the name decides; a name no
+            # function binds is the module's.
+            scope = next((b for b in reversed(self.scopes) if data.value in b.count), self.ctx.bindings)
+            data = scope.expression(data.value)
         if isinstance(data, (cst.List, cst.Tuple)) and not any(isinstance(e, cst.StarredElement) for e in data.elements):
             return [e.value for e in data.elements]
         return None
@@ -176,6 +196,7 @@ class NamedtupleCloudpickle(Detector):
             self.report(self.first, "A module-level namedtuple in a file that ships closures to executors. Spark 3.4 removed "
                                     "PySpark's namedtuple patch, so cloudpickle pickles it by reference and every executor "
                                     "must import this module: ModuleNotFoundError unless the package is shipped (--py-files, "
-                                    "a zip, or installed on the nodes). Ship it, or set PYSPARK_ENABLE_NAMEDTUPLE_PATCH=1 on "
-                                    "the driver and executors -- an environment variable, so codegen cannot inject it. "
-                                    "Unaffected if this file is the entry script.", "medium")
+                                    "a zip, or installed on the nodes). Ship it, or restore the patch with "
+                                    "PYSPARK_ENABLE_NAMEDTUPLE_PATCH=1: spark.executorEnv.PYSPARK_ENABLE_NAMEDTUPLE_PATCH=1 sets "
+                                    "it on the executors, and a client-mode driver needs it in its own environment, set "
+                                    "before pyspark is imported. Unaffected if this file is the entry script.", "medium")

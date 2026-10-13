@@ -11,7 +11,8 @@ import org.openrewrite.marker.SearchResult;
 /**
  * Java-side counterpart to the Scalafix {@code MigrateToSparkSessionBuilder}
  * rule: direct {@code SQLContext} construction is deprecated in favor of
- * {@code SparkSession.builder()...getOrCreate()}. All three constructors
+ * {@code SparkSession.builder()...getOrCreate()}. The constructors still
+ * exist in 3.5.5 ({@code javap} 2026-10-13), so this is not a compile break. All three constructors
  * verified present in the real {@code spark-sql_2.11-2.4.8.jar} via
  * {@code javap} (2026-09-24).
  *
@@ -40,7 +41,8 @@ public class SparkSqlContextConstructorDetect extends Recipe {
 
     @Override
     public String getDescription() {
-        return "new SQLContext(...) is deprecated; migrate to SparkSession.builder()...getOrCreate().";
+        return "new SQLContext(...) is deprecated but still works in Spark 3.5.5; migrate to " +
+                "SparkSession.builder()...getOrCreate().";
     }
 
     @Override

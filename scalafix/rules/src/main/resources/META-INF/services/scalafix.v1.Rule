@@ -7,12 +7,10 @@ fix.OnFailureFix
 fix.ExecutorPluginWarn
 fix.UnionRewrite
 fix.GroupByKeyWarn
-fix.GroupByKeyRewrite
 fix.MetadataWarnQQ
 fix.ScalaTestImportChange
 fix.ScalaTestExtendsFix
 fix.MigrateTrigger
-fix.GroupByKeyRenameColumnQQ
 fix.MultiLineDatasetReadWarn
 fix.ExpressionEncoder
 fix.SparkSQLCallExternal

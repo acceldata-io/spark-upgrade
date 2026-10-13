@@ -33,7 +33,7 @@ class SparkHiveContextConstructorDetectTest implements RewriteTest {
 
                         class Setup {
                             HiveContext build(SparkContext sc) {
-                                return /*~~(HiveContext is removed in Spark 3.x; migrate to SparkSession.builder().enableHiveSupport().getOrCreate().)~~>*/new HiveContext(sc);
+                                return /*~~(HiveContext is deprecated (it still exists in Spark 3.5.5); migrate to SparkSession.builder().enableHiveSupport().getOrCreate().)~~>*/new HiveContext(sc);
                             }
                         }
                         """
