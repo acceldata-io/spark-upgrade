@@ -6,23 +6,19 @@ import scalafix.v1._
 import scala.meta._
 
 /**
- * Tier 2 / Class A detector (design review Part 4): the 2-arg
- * `functions.udf(f: AnyRef, dataType: DataType)` form is deprecated in
- * Spark 3.x and, per the migration guide, also changes null semantics (a
- * null input used to return null; now it returns the return type's zero
- * value). Every typed `udf[...]` overload takes exactly ONE value argument
- * (the function literal); only this untyped form takes two, which is what
- * makes a plain arity check on the matched call sufficient here -- no
- * deeper type inspection needed to tell the two apart.
- *
- * Feeds `spark.sql.legacy.allowUntypedScalaUDF` (LegacyConfigRegistry), but
- * the registry's own remediation note is explicit that rewriting to a typed
- * UDF is preferred over injecting the config, since the config alone does
- * not restore the old null-handling behavior.
+ * Tier 3 detector: the untyped `functions.udf(f: AnyRef, dataType: DataType)`
+ * form throws at udf creation on Spark 3.x unless
+ * `spark.sql.legacy.allowUntypedScalaUDF=true`, and that config does not
+ * restore 2.4: probed, `udf((x: Int) => x + 1, IntegerType)` on [1, null]
+ * gives [2, null] on 2.4.8 but [2, 1] on 3.5.5 with the config (a null
+ * becomes 0 for a primitive parameter). The config is job-global, so it is
+ * never injected; the fix is a typed UDF. Every typed `udf[...]` overload
+ * takes exactly ONE value argument and only this form takes two, so an arity
+ * check on the matched call tells them apart.
  */
 class UntypedScalaUDFDetect extends SemanticRule("UntypedScalaUDFDetect") {
   override val description =
-    "Flags the deprecated 2-arg functions.udf(AnyRef, DataType) form, which also changed null-handling semantics in Spark 3.0."
+    "Flags the untyped functions.udf(AnyRef, DataType) form, which Spark 3.x rejects; rewrite it as a typed UDF."
 
   private val udfMatcher = SymbolMatcher.normalized("org.apache.spark.sql.functions.udf")
 
@@ -32,10 +28,12 @@ class UntypedScalaUDFDetect extends SemanticRule("UntypedScalaUDFDetect") {
         RuleFinding.report(
           RuleChange(
             "UntypedScalaUDFDetect",
-            "functions.udf(AnyRef, DataType) -- the untyped 2-arg form -- is deprecated in Spark 3.0 and also changed null-handling: " +
-              "a null input used to return null, now it returns the return type's zero value.",
-            "No auto-rewrite; prefer rewriting to a typed UDF over injecting spark.sql.legacy.allowUntypedScalaUDF, " +
-              "since the config alone doesn't restore the old null semantics.",
+            "functions.udf(AnyRef, DataType) -- the untyped form -- throws at udf creation on Spark 3.x. " +
+              "spark.sql.legacy.allowUntypedScalaUDF lets it run, but then a null input to a primitive parameter becomes 0 " +
+              "(udf((x: Int) => x + 1, IntegerType) gives 1 for null, where 2.4 gave null).",
+            "Rewrite as a typed UDF, e.g. udf((x: Int) => x + 1) or udf[Int, Int](...), which returns null for a null " +
+              "primitive input as 2.4 did; use a boxed type (java.lang.Integer) or Option if the function must see the null. " +
+              "Do not set spark.sql.legacy.allowUntypedScalaUDF: it silently turns null into 0 for primitive parameters.",
             t
           )
         )

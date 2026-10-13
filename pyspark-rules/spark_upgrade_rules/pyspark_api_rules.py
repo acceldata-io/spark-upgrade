@@ -199,7 +199,8 @@ class MlSharedParamSetters(Fixer):
 
 # ---- removed APIs ----------------------------------------------------------------
 
-# Imported names that no longer exist, by module: (replacement module or None, what to do).
+# Imported names that no longer exist at their 2.4 path: moved as they are (rewritten), or
+# gone or changed (reported, with what to do -- the new import where there is one).
 _MOVED = {
     ("pyspark.sql.utils", "require_minimum_pandas_version"): "pyspark.sql.pandas.utils",
     ("pyspark.sql.utils", "require_minimum_pyarrow_version"): "pyspark.sql.pandas.utils",
@@ -207,10 +208,18 @@ _MOVED = {
 _GONE = {
     ("pyspark.ml.param.shared", "DecisionTreeParams"):
         "removed in 3.0 -- the tree params moved to private classes; set maxDepth & co. through the estimator itself",
-    ("pyspark.ml.util", "JavaPredictionModel"): "removed in 3.0 -- extend pyspark.ml.wrapper.JavaPredictionModel's successor, "
-                                                "pyspark.ml.base.PredictionModel",
-    ("pyspark.sql.utils", "capture_sql_exception"): "removed -- PySpark's exception conversion is internal (pyspark.errors) since 3.4",
-    ("pyspark.sql.utils", "install_exception_handler"): "removed -- PySpark's exception conversion is internal (pyspark.errors) since 3.4",
+    # 2.4's was a mixin beside JavaModel; 3.0's subclasses JavaModel, so
+    # `class M(JavaModel, JavaPredictionModel)` has no consistent MRO.
+    ("pyspark.ml.util", "JavaPredictionModel"):
+        "moved to pyspark.ml.wrapper in 3.0 (from pyspark.ml.wrapper import JavaPredictionModel), and is now a full model "
+        "class that extends JavaModel rather than a mixin -- drop JavaModel from the class's bases, or the class cannot be "
+        "created (inconsistent MRO)",
+    ("pyspark.sql.utils", "capture_sql_exception"):
+        "moved to pyspark.errors.exceptions.captured in 3.4 (from pyspark.errors.exceptions.captured import "
+        "capture_sql_exception); an internal API -- it now converts to pyspark.errors exception classes",
+    ("pyspark.sql.utils", "install_exception_handler"):
+        "moved to pyspark.errors.exceptions.captured in 3.4 (from pyspark.errors.exceptions.captured import "
+        "install_exception_handler); an internal API -- it now converts to pyspark.errors exception classes",
 }
 ENCODER_ESTIMATOR = "pyspark.ml.feature.OneHotEncoderEstimator"
 ENCODER = "pyspark.ml.feature.OneHotEncoder"
@@ -224,7 +233,8 @@ class RemovedPySparkApi(Fixer):
     version checks, which moved to `pyspark.sql.pandas.utils`. Reported:
     `KMeansModel.computeCost`, 2.4's transformer `OneHotEncoder` used
     without `fit`, ML readers/writers' `.context(...)`, and imports of names
-    with no successor."""
+    with no successor or whose successor is not a drop-in (`_GONE`, which
+    names the new import where there is one)."""
 
     rule_id = "RemovedPySparkApi"
 

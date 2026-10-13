@@ -38,7 +38,7 @@ class DefinedSqlTest(unittest.TestCase):
             OK = "SELECT from_utc_timestamp(ts, 'Africa/Johannesburg') FROM cdr"
         """
         self.assertEqual(lines(code, "InvalidTimeZoneIdDetect"), [2])
-        self.assertEqual(lines(code, "AddMonthsSnapDetect"), [3])
+        self.assertEqual(lines(code, "AddMonthsSnapDetect.Manual"), [3])
         self.assertEqual(lines(code, "DateTimeFormatPatternValidator"), [4])
 
     def test_a_call_literal_is_reported_once_at_the_call(self):
@@ -46,7 +46,7 @@ class DefinedSqlTest(unittest.TestCase):
             Q = "SELECT add_months(d, 1) FROM t"
             spark.sql(Q)
         """
-        self.assertEqual(lines(code, "AddMonthsSnapDetect"), [3])
+        self.assertEqual(lines(code, "AddMonthsSnapDetect.Manual"), [3])
 
 
 class DateTimePatternTest(unittest.TestCase):
@@ -121,7 +121,8 @@ class FunctionRulesTest(unittest.TestCase):
             b = F.expr("add_months(d, 1)")
             ok = F.date_add("d", 1)
         """
-        self.assertEqual(lines(code, "AddMonthsSnapDetect"), [2, 3])
+        self.assertEqual(lines(code, "AddMonthsSnapDetect.Manual"), [2, 3], "a generated name, and SQL text, are reported; "
+                                                                           "rewrites: test_fix.AddMonthsSnapTest")
 
     def test_negative_decimal_scale(self):
         code = """
@@ -337,6 +338,34 @@ class PySparkGuide34Test(unittest.TestCase):
         """
         found = run(code, "ArrayTypeSchemaInference")
         self.assertEqual([(f["line"] - 2, f["confidence"]) for f in found], [(2, "low"), (3, "low"), (4, "low")])
+
+    def test_array_inference_skips_dataframe_renames(self):
+        code = """
+            a = df.toDF(*cols)
+            b = df.toDF("id", "name")
+            c = rdd.toDF()
+            d = rdd.toDF(["id", "tags"], 0.5)
+        """
+        found = run(code, "ArrayTypeSchemaInference")
+        self.assertEqual([(f["line"] - 2, f["confidence"]) for f in found], [(4, "low"), (5, "low")])
+
+    def test_array_inference_reads_a_name_bound_in_the_function(self):
+        code = """
+            def test_scalar(spark):
+                data = [{"id": 1, "name": "a"}]
+
+                df = spark.createDataFrame(data)
+
+            def test_mixed(spark):
+                data = [(1, [1, 1.5])]
+
+                df = spark.createDataFrame(data, ["id", "xs"])
+
+            def test_param(spark, data):
+                df = spark.createDataFrame(data)
+        """
+        found = run(code, "ArrayTypeSchemaInference")
+        self.assertEqual([(f["line"] - 2, f["confidence"]) for f in found], [(10, "high"), (13, "low")])
 
     def test_namedtuple_only_where_closures_ship(self):
         ships = "from collections import namedtuple\nP = namedtuple('P', ['a'])\nx = rdd.map(lambda i: P(i))\n"

@@ -14,30 +14,56 @@ class SparkGroupByKeyCountWarnTest implements RewriteTest {
     }
 
     @Test
-    void flagsGroupByKey() {
+    void flagsCountAggAndReduceGroups() {
         rewriteRun(
                 java(
                         """
+                        import org.apache.spark.api.java.function.MapFunction;
+                        import org.apache.spark.api.java.function.ReduceFunction;
                         import org.apache.spark.sql.Dataset;
                         import org.apache.spark.sql.Encoders;
-                        import org.apache.spark.sql.KeyValueGroupedDataset;
                         import org.apache.spark.sql.Row;
+                        import org.apache.spark.sql.expressions.javalang.typed;
+                        import scala.Tuple2;
 
                         class Grouping {
-                            KeyValueGroupedDataset<String, Row> group(Dataset<Row> ds) {
-                                return ds.groupByKey(r -> r.getString(0), Encoders.STRING());
+                            Dataset<Tuple2<String, Object>> counts(Dataset<Row> ds) {
+                                return ds.groupByKey((MapFunction<Row, String>) r -> r.getString(0), Encoders.STRING()).count();
+                            }
+
+                            Dataset<Tuple2<String, Long>> sums(Dataset<Row> ds) {
+                                return ds.groupByKey((MapFunction<Row, String>) r -> r.getString(0), Encoders.STRING())
+                                        .agg(typed.sumLong((MapFunction<Row, Long>) r -> r.getLong(1)));
+                            }
+
+                            Dataset<Tuple2<Integer, String>> longest(Dataset<String> ds) {
+                                return ds.groupByKey((MapFunction<String, Integer>) String::length, Encoders.INT())
+                                        .reduceGroups((ReduceFunction<String>) (a, b) -> a.length() >= b.length() ? a : b);
                             }
                         }
                         """,
                         """
+                        import org.apache.spark.api.java.function.MapFunction;
+                        import org.apache.spark.api.java.function.ReduceFunction;
                         import org.apache.spark.sql.Dataset;
                         import org.apache.spark.sql.Encoders;
-                        import org.apache.spark.sql.KeyValueGroupedDataset;
                         import org.apache.spark.sql.Row;
+                        import org.apache.spark.sql.expressions.javalang.typed;
+                        import scala.Tuple2;
 
                         class Grouping {
-                            KeyValueGroupedDataset<String, Row> group(Dataset<Row> ds) {
-                                return /*~~(groupByKey's grouping attribute is named "key" from Spark 3.0 onward, not 2.4's "value", for a non-struct key. Review every "value" column reference derived from this pipeline.)~~>*/ds.groupByKey(r -> r.getString(0), Encoders.STRING());
+                            Dataset<Tuple2<String, Object>> counts(Dataset<Row> ds) {
+                                return /*~~(For a non-struct key, this result's key column is named "key" from Spark 3.0, not 2.4's "value"; spark.sql.legacy.dataset.nameNonStructGroupingKeyAsValue=true restores "value".)~~>*/ds.groupByKey((MapFunction<Row, String>) r -> r.getString(0), Encoders.STRING()).count();
+                            }
+
+                            Dataset<Tuple2<String, Long>> sums(Dataset<Row> ds) {
+                                return /*~~(For a non-struct key, this result's key column is named "key" from Spark 3.0, not 2.4's "value"; spark.sql.legacy.dataset.nameNonStructGroupingKeyAsValue=true restores "value".)~~>*/ds.groupByKey((MapFunction<Row, String>) r -> r.getString(0), Encoders.STRING())
+                                        .agg(typed.sumLong((MapFunction<Row, Long>) r -> r.getLong(1)));
+                            }
+
+                            Dataset<Tuple2<Integer, String>> longest(Dataset<String> ds) {
+                                return /*~~(For a non-struct key, this result's key column is named "key" from Spark 3.0, not 2.4's "value"; spark.sql.legacy.dataset.nameNonStructGroupingKeyAsValue=true restores "value".)~~>*/ds.groupByKey((MapFunction<String, Integer>) String::length, Encoders.INT())
+                                        .reduceGroups((ReduceFunction<String>) (a, b) -> a.length() >= b.length() ? a : b);
                             }
                         }
                         """
@@ -46,17 +72,24 @@ class SparkGroupByKeyCountWarnTest implements RewriteTest {
     }
 
     @Test
-    void leavesUnrelatedMethodUntouched() {
+    void leavesUnaffectedGroupedOperationsUntouched() {
         rewriteRun(
                 java(
                         """
-                        class Grouping {
-                            String groupByKey(String key) {
-                                return key;
-                            }
+                        import org.apache.spark.api.java.function.MapFunction;
+                        import org.apache.spark.api.java.function.MapGroupsFunction;
+                        import org.apache.spark.sql.Dataset;
+                        import org.apache.spark.sql.Encoders;
+                        import org.apache.spark.sql.KeyValueGroupedDataset;
 
-                            String use() {
-                                return groupByKey("k");
+                        class Grouping {
+                            void use(Dataset<String> ds) {
+                                KeyValueGroupedDataset<Integer, String> byLength =
+                                        ds.groupByKey((MapFunction<String, Integer>) String::length, Encoders.INT());
+                                Dataset<Integer> sizes = byLength.mapGroups(
+                                        (MapGroupsFunction<Integer, String, Integer>) (k, it) -> k, Encoders.INT());
+                                Dataset<Integer> keys = byLength.keys();
+                                long rows = ds.count();
                             }
                         }
                         """

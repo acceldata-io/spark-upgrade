@@ -3,56 +3,44 @@ rule=GroupByKeyWarn
  */
 package fix
 import org.apache.spark.sql.{SparkSession, Dataset}
+import org.apache.spark.sql.functions.{col, sum}
 
 class GroupByKeyWarn {
   def inSource(sparkSession: SparkSession): Unit = {
     import sparkSession.implicits._
-    val ds1 = List(
-      "Person 1",
-      "Person 2",
-      "User 1",
-      "User 2",
-      "User 3",
-      "Test",
-      "Test Test"
-    ).toDS()
-      .groupByKey(l => l.substring(0, 3)) // assert: GroupByKeyWarn
-      .count()
+    val ds1 = List("Person 1", "User 1", "Test")
+      .toDS()
+      .groupByKey(l => l.substring(0, 3))
+      .count() // assert: GroupByKeyWarn
 
     val noChange: Dataset[String] = List("1").toDS()
     val noChangeMore = List("1").toDS().count()
 
-    // Make sure we trigger not just on toDS
-    val someChange = noChange.groupByKey(l => // assert: GroupByKeyWarn
-          l.substring(0, 3).toUpperCase()
-        )
-        .count()
+    // The grouped dataset held in a val first.
+    val grouped = noChange.groupByKey(l => l.length)
+    val counted = grouped.count() // assert: GroupByKeyWarn
 
-    val ds2: Dataset[(String, Long)] =
-      List("Test 1", "Test 2", "user 1", "Person 1", "Person 2")
-        .toDS()
-        .groupByKey(l => // assert: GroupByKeyWarn
-          l.substring(0, 3).toUpperCase()
-        )
-        .count()
+    val aggregated = List(1, 2, 3).toDS()
+      .groupByKey(l => l > 1)
+      .agg(sum(col("value")).as[Long]) // assert: GroupByKeyWarn
 
-    val ds3 =
-      List(1, 2, 3, 4, 5, 6)
-        .toDS()
-        .groupByKey(l => l > 3) // assert: GroupByKeyWarn
-        .count()
+    // mapValues keeps the grouping, so count() after it still outputs the key.
+    val viaMapValues = List(1, 2, 3).toDS()
+      .groupByKey(l => l % 2)
+      .mapValues(_ * 2)
+      .count() // assert: GroupByKeyWarn
 
-    val ds4 =
-      List(Array(19, 12), Array(1, 2, 3, 4, 5, 6), Array(678, 99, 88))
-        .toDS()
-        .groupByKey(l => l.length >= 3) // assert: GroupByKeyWarn
-        .count()
+    val g = List(1, 2, 3).toDS().groupByKey(l => l % 2)
+    val reduced = g.reduceGroups(_ + _) // assert: GroupByKeyWarn
 
-    val ds5 = Seq("test 1", "test 2", "test 3").toDS()
+    // These never output the grouping column: not flagged.
+    val mapped = g.mapGroups((k, vs) => k + vs.size)
+    val flatMapped = g.flatMapGroups((k, vs) => vs)
+    val keys = g.keys
 
+    // Untyped groupBy and Dataset.count are unrelated.
     val ds6 = Seq("test 1", "test 2", "test 3").toDS().groupBy("value").count()
-
-    val ds7 = Seq("test 1", "test 2", "test 3").toDF().groupBy("value").count()
+    val ds7 = Seq("test 1", "test 2", "test 3").toDF().groupBy("value").agg(sum("value"))
   }
 
 }

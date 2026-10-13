@@ -6,11 +6,11 @@ import scalafix.v1._
 import scala.meta._
 
 /**
- * Tier 3 detector (design review Part 2 Family H): Spark 3.0 removed
- * automatic BOM (byte-order-mark) detection for CSV -- a UTF-8-with-BOM file
- * read under `multiLine=true` now gets the BOM bytes folded into the first
- * column's value instead of stripped, unless the read explicitly names its
- * `encoding`. No legacy config restores the old auto-detection, so this is
+ * Tier 3 detector (design review Part 2 Family H): a CSV read under
+ * `multiLine=true` with no explicit `encoding` no longer picks the charset
+ * up from a UTF-16/UTF-32 byte-order mark in Spark 3.x, so such a file is
+ * misread. A UTF-8 BOM is still skipped, so UTF-8 files are unaffected.
+ * No legacy config restores the old detection, so this is
  * detect-only -- narrowed to the unambiguous, purely syntactic case design
  * review Part 2 Family H calls "statically detectable": a `.csv(...)`
  * read call whose receiver chain sets `multiLine` to a literal `true` but
@@ -20,7 +20,7 @@ import scala.meta._
  */
 class CsvBomMultilineDetect extends SemanticRule("CsvBomMultilineDetect") {
   override val description =
-    "Flags a CSV read with multiLine=true and no explicit encoding option -- Spark 3.0 removed automatic BOM detection for CSV."
+    "Flags a CSV read with multiLine=true and no explicit encoding option -- Spark 3.x misreads a UTF-16/UTF-32 file there."
 
   private def hasOption(recv: Tree, key: String, literalValue: Option[String]): Boolean =
     recv.collect {
@@ -39,8 +39,10 @@ class CsvBomMultilineDetect extends SemanticRule("CsvBomMultilineDetect") {
         RuleFinding.report(
           RuleChange(
             "CsvBomMultilineDetect",
-            "csv(...) read with multiLine set to true and no explicit encoding option; Spark 3.0 removed automatic BOM detection, so a UTF-8-with-BOM file's BOM bytes now land in the first column's value instead of being stripped.",
-            "No auto-rewrite and no legacy config restores this -- set .option(\"encoding\", \"UTF-8\") explicitly (or strip the BOM upstream) if the source files may have one.",
+            "csv(...) read with multiLine set to true and no explicit encoding option; Spark 3.x no longer detects a UTF-16/UTF-32 " +
+              "file from its byte-order mark here, so such a file is misread. A UTF-8 BOM is still skipped; UTF-8 files are unaffected.",
+            "No auto-rewrite and no legacy config restores this -- if the source files can be UTF-16/UTF-32, set " +
+              ".option(\"encoding\", ...) to their charset explicitly.",
             t
           )
         )

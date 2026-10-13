@@ -269,7 +269,7 @@ class SparkSQLCallExternal extends SemanticRule("SparkSQLCallExternal") {
                           "sqlfluff's sparksql dialect could not parse this SQL literal, so NONE of the Family K " +
                             "SQL rules were evaluated against it -- treat this as 'not checked', not 'clean'. " +
                             "Common causes: syntax Spark accepts but the dialect doesn't model yet, and syntax " +
-                            "Spark 3.x itself rejects (a leading `FROM`, for instance, which FromWithoutSelectDetect " +
+                            "Spark 3.x itself rejects (a bare `FROM t`, for instance, which FromWithoutSelectDetect " +
                             "reports separately).",
                           "No auto-rewrite; review this SQL by hand.",
                           endPos

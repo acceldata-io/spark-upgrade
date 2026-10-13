@@ -18,7 +18,9 @@ object NewDetectors {
 
   def fromFirst(spark: SparkSession): Unit = {
     spark.sql("FROM events")// assert: FromWithoutSelectDetect
-    spark.sql("from events select id")// assert: FromWithoutSelectDetect
+    // Hive's FROM-first forms still run on 3.5.5
+    spark.sql("from events select id")
+    spark.sql("FROM events INSERT INTO TABLE t SELECT id")
     // a normal query, and a table whose name merely starts with "from"
     spark.sql("SELECT id FROM fromage")
   }

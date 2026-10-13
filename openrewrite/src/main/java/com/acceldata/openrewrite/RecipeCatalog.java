@@ -5,6 +5,7 @@ import org.openrewrite.config.Environment;
 
 import com.acceldata.openrewrite.spark.SparkAccumulableInfoConstructionDetect;
 import com.acceldata.openrewrite.spark.SparkAccumulatorV1Detect;
+import com.acceldata.openrewrite.spark.SparkAddMonthsRewrite;
 import com.acceldata.openrewrite.spark.SparkAddMonthsUsageWarn;
 import com.acceldata.openrewrite.spark.SparkAnalysisExceptionPlanUsageDetect;
 import com.acceldata.openrewrite.spark.SparkCalendarIntervalUsageDetect;
@@ -139,6 +140,9 @@ public final class RecipeCatalog {
         byId.put(SparkDuplicateMapKeyLiteralDetect.class.getName(), new SparkDuplicateMapKeyLiteralDetect());
         byId.put(SparkMapTypeKeyInCreateMapDetect.class.getName(), new SparkMapTypeKeyInCreateMapDetect());
         byId.put(SparkAddMonthsUsageWarn.class.getName(), new SparkAddMonthsUsageWarn());
+        // 2026-10-13: the exact rewrite for the add_months calls it can prove
+        // safe; SparkAddMonthsUsageWarn reports the rest.
+        byId.put(SparkAddMonthsRewrite.class.getName(), new SparkAddMonthsRewrite());
         byId.put(SparkDateTimeFormatPatternDetect.class.getName(), new SparkDateTimeFormatPatternDetect());
         byId.put(SparkMesosUsageDetect.class.getName(), new SparkMesosUsageDetect());
         byId.put(SparkLog4j1UsageDetect.class.getName(), new SparkLog4j1UsageDetect());

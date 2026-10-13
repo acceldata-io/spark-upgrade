@@ -648,12 +648,13 @@ class Rule_BINARYCONV_L009(BaseRule):
 
 
 class Rule_CTEPRECEDENCE_L010(BaseRule):
-    """Spark 3.0 changed which CTE wins when an inner WITH shadows an outer one.
+    """Spark 3.0 rejects an inner WITH that shadows an outer CTE of the same name.
 
     A nested ``WITH`` clause defining a CTE with the same name as an
-    enclosing one used to resolve to the OUTER definition; Spark 3.0 (and
-    ANSI SQL) resolves to the INNER one instead
-    (``spark.sql.legacy.ctePrecedencePolicy``). Detected structurally: any
+    enclosing one resolved to the OUTER definition in 2.4; Spark 3.x fails
+    the query by default (``spark.sql.legacy.ctePrecedencePolicy=EXCEPTION``).
+    ``LEGACY`` restores 2.4's outer-wins resolution; ``CORRECTED`` makes the
+    INNER one win, which changes the result. Detected structurally: any
     ``common_table_expression`` whose name also names an ANCESTOR
     ``common_table_expression`` in the same query is exactly the shape that
     changed meaning.
@@ -695,10 +696,10 @@ class Rule_CTEPRECEDENCE_L010(BaseRule):
                 if self._cte_name(cte) == name:
                     return LintResult(
                         anchor=context.segment,
-                        description=f'CTE "{name}" shadows an enclosing CTE of the same name. Spark 3.0 '
-                        "resolves references to the INNER definition; 2.4 resolved to the OUTER one. "
-                        "Rename one of the two, or inject spark.sql.legacy.ctePrecedencePolicy=LEGACY "
-                        "to restore the old resolution order. See "
+                        description=f'CTE "{name}" shadows an enclosing CTE of the same name. 2.4 resolved '
+                        "references to the OUTER definition; Spark 3.x fails the query by default. "
+                        "spark.sql.legacy.ctePrecedencePolicy=LEGACY restores 2.4's resolution (CORRECTED "
+                        "would use the INNER one and change the result). See "
                         "https://spark.apache.org/docs/latest/sql-migration-guide.html",
                     )
         return None

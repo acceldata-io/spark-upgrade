@@ -24,7 +24,7 @@ class SparkMllibSgdModelUsageDetectTest implements RewriteTest {
                         }
                         """,
                         """
-                        /*~~(org.apache.spark.mllib.classification.LogisticRegressionWithSGD is removed in Spark 3.0 -- migrate to its spark.ml equivalent.)~~>*/import org.apache.spark.mllib.classification.LogisticRegressionWithSGD;
+                        /*~~(org.apache.spark.mllib.classification.LogisticRegressionWithSGD's train(...) methods and no-arg constructor are removed in Spark 3.0 -- migrate to its spark.ml equivalent.)~~>*/import org.apache.spark.mllib.classification.LogisticRegressionWithSGD;
 
                         class Trainer {
                         }

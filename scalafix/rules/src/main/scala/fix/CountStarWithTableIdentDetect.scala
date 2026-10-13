@@ -15,13 +15,14 @@ import scala.util.matching.Regex
  * `SqlInStringDetect` finds -- this is a SQL-text concern, not a Scala-API
  * one.
  *
- * Feeds `spark.sql.legacy.allowStarWithSingleTableIdentifierInCount`, but
- * the registry's own remediation note prefers rewriting to `count(*)` over
- * injecting the config.
+ * Feeds `spark.sql.legacy.allowStarWithSingleTableIdentifierInCount`, which
+ * restores 2.4 exactly. `count(*)` is NOT equivalent: 2.4's `count(t.*)`
+ * counts rows where every column of t is non-null (probed on rows
+ * (1,null),(2,3),(null,null): count(t.*) = 1, count(*) = 3 on 2.4.8).
  */
 class CountStarWithTableIdentDetect extends SemanticRule("CountStarWithTableIdentDetect") {
   override val description =
-    "Flags count(tbl.*) in SQL text, which Spark 3.0's parser rejects -- only bare count(*) is allowed."
+    "Flags count(tbl.*) in SQL text, which Spark 3.0 rejects; in 2.4 it counts rows where every column of tbl is non-null."
 
   private val sqlMatcher = SymbolMatcher.normalized(
     "org.apache.spark.sql.SparkSession.sql",
@@ -36,8 +37,10 @@ class CountStarWithTableIdentDetect extends SemanticRule("CountStarWithTableIden
         RuleFinding.report(
           RuleChange(
             "CountStarWithTableIdentDetect",
-            "This SQL literal contains count(tbl.*) (a table-qualified star), which Spark 3.0's parser rejects -- only bare count(*) is allowed.",
-            "No auto-rewrite; rewrite to count(*) instead of injecting spark.sql.legacy.allowStarWithSingleTableIdentifierInCount.",
+            "This SQL literal contains count(tbl.*) (a table-qualified star), which Spark 3.0 rejects. In 2.4 it counts the rows " +
+              "where every column of tbl is non-null, not all rows, so count(*) gives a different result.",
+            "No code change: spark.sql.legacy.allowStarWithSingleTableIdentifierInCount=true is injected and keeps 2.4's result. " +
+              "To drop the config, rewrite to count(c1, c2, ...) listing every column of tbl -- not count(*).",
             lit
           )
         )

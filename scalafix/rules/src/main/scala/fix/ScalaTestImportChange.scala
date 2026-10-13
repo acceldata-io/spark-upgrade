@@ -56,7 +56,7 @@ class ScalaTestImportChange
           case i @ Importee.Name(Name("FunSuiteLike")) if ownerText == "org.scalatest" =>
             rewrite(i, importer"org.scalatest.funsuite.AnyFunSuiteLike", "org.scalatest.funsuite.AnyFunSuiteLike")
           case i @ Importee.Name(Name("AsyncFunSuite")) if ownerText == "org.scalatest" =>
-            rewrite(i, importer"org.scalatest.funsuite.AsyncFunSuiteLike", "org.scalatest.funsuite.AsyncFunSuiteLike")
+            rewrite(i, importer"org.scalatest.funsuite.AsyncFunSuite", "org.scalatest.funsuite.AsyncFunSuite")
           case i @ Importee.Name(Name("FunSuite")) if ownerText == "org.scalatest.fixture" =>
             rewrite(i, importer"org.scalatest.funsuite.FixtureAnyFunSuite", "org.scalatest.funsuite.FixtureAnyFunSuite")
           case i @ Importee.Name(Name("Matchers")) if ownerText == "org.scalatest" =>
