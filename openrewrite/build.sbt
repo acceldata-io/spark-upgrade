@@ -24,6 +24,8 @@ ThisBuild / scalaVersion := "2.12.18" // sbt itself needs a Scala version pinned
 val openRewriteVersion = "8.56.1"
 val rewriteMigrateJavaVersion = "3.12.0"
 
+lazy val CompileBreakJars = config("compileBreakJars").hide
+
 lazy val root = (project in file("."))
   .settings(
     name := "spark-openrewrite-rules",
@@ -60,7 +62,13 @@ lazy val root = (project in file("."))
       // Only spark-hive needs its own entry (SparkHiveContextConstructorDetectTest):
       // spark-core is already a transitive dependency of spark-sql, and
       // MethodMatcher type attribution needs the real classpath either way.
-      "org.apache.spark" % "spark-hive_2.11" % "2.4.8" % Test
+      "org.apache.spark" % "spark-hive_2.11" % "2.4.8" % Test,
+      // MLlib and JavaStreamingContext types for SparkCompileBreakDetectTest
+      // only, passed to it as -DcompileBreakJars: on the shared test
+      // classpath, spark-mllib would resolve the import that
+      // SparkOneHotEncoderEstimatorUsageDetectTest needs unresolved.
+      "org.apache.spark" % "spark-mllib_2.11" % "2.4.8" % CompileBreakJars,
+      "org.apache.spark" % "spark-streaming_2.11" % "2.4.8" % CompileBreakJars
     ),
     // Runs JUnit5 tests under sbt (RewriteTest specs are JUnit5, not
     // ScalaTest) -- needs the matching project/plugins.sbt entry too.
@@ -73,7 +81,10 @@ lazy val root = (project in file("."))
     // recipe count grew past ~15 test classes in the 2026-09-24 session
     // (observed: real OutOfMemoryError mid-suite, not a flaky failure).
     Test / fork := true,
-    Test / javaOptions += "-Xmx3g"
+    Test / javaOptions += "-Xmx3g",
+    ivyConfigurations += CompileBreakJars,
+    Test / javaOptions += "-DcompileBreakJars=" +
+      Classpaths.managedJars(CompileBreakJars, classpathTypes.value, update.value).files.mkString(java.io.File.pathSeparator)
   )
 
 Compile / mainClass := Some("com.acceldata.openrewrite.Runner")

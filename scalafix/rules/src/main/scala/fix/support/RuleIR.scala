@@ -693,8 +693,40 @@ object RuleRegistry {
       description = "Procedure syntax (def f() { ... }, no `=`) is deprecated in Scala 2.12 and removed in 2.13; rewrites to def f(): Unit = { ... }.",
       docLink = "https://docs.scala-lang.org/scala3/guides/migration/incompat-syntactic.html#procedure-syntax",
       defaultConfidence = "high"
+    ),
+    // New 2026-10-13: source that compiles on 2.4.8/2.11/JDK 8 and not on
+    // 3.5.5/2.12/JDK 17, each probed both ways. Every finding is a
+    // `CompileBreakDetect.<Sub>` sub-id with its own text. Tier 1, targetOnly
+    // since 2026-10-14 for the rows with an exact rewrite (they inherit this
+    // entry); the rows without one and every `.Manual` site are Tier 3 below.
+    RuleMeta(
+      ruleId = "CompileBreakDetect",
+      tier = 1,
+      description = "Code that compiles on Spark 2.4.8 / Scala 2.11 / JDK 8 but not on Spark 3.5.5 / Scala 2.12 / JDK 17, rewritten where the 3.5.5 form is exact: an untyped foreachPartition/foreachBatch lambda gets its inferred types, RowEncoder(schema) becomes ExpressionEncoder(schema), removed MLlib aliases become their equivalents, the window boundary functions become Window's Long boundaries, databricks .avro(path) becomes format(\"avro\"), InterfaceStability.X becomes annotation.X.",
+      docLink = "https://spark.apache.org/docs/latest/core-migration-guide.html",
+      defaultConfidence = "high",
+      targetOnly = true
     )
-  )
+  ) ++
+    // No exact rewrite (sun.misc in Scala: no SemanticDB, analysis compiles on JDK 17).
+    Seq("SunMiscBase64", "MlKMeansComputeCost", "SparkHadoopUtil", "ImageSchemaReadImages", "AccumulableApi",
+      "MllibWithSgd").map(sub => RuleMeta(
+      ruleId = s"CompileBreakDetect.$sub",
+      tier = 3,
+      description = "Code that compiles on Spark 2.4.8 / Scala 2.11 / JDK 8 but not on Spark 3.5.5 / Scala 2.12 / JDK 17, with no exact rewrite (a removed API, sun.misc.BASE64*). The finding names the fix.",
+      docLink = "https://spark.apache.org/docs/latest/core-migration-guide.html",
+      defaultConfidence = "high"
+    )) ++
+    // A site of a rewriting row in a shape the rewrite does not handle.
+    Seq("ForeachPartitionLambda", "ForeachBatchLambda", "MulticlassMetricsNoLabel", "KMeansRuns",
+      "GbtNumTrees", "StageInfoAttemptId", "InterfaceStability", "MlReadWriteContext", "WindowBoundaryFunctions",
+      "RangeBetweenColumns", "DatabricksAvro", "MlpLayers").map(sub => RuleMeta(
+      ruleId = s"CompileBreakDetect.$sub.Manual",
+      tier = 3,
+      description = "Code that compiles on Spark 2.4.8 but not on Spark 3.5.5, in a shape the tool does not rewrite exactly (a placeholder lambda, a lit(n) window bound, KMeans.getRuns, ...). The finding says why and names the fix.",
+      docLink = "https://spark.apache.org/docs/latest/core-migration-guide.html",
+      defaultConfidence = "high"
+    ))
 
   val all: Map[String, RuleMeta] = entries.map(m => m.ruleId -> m).toMap
 
