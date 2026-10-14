@@ -9,6 +9,8 @@ import com.acceldata.openrewrite.spark.SparkAddMonthsRewrite;
 import com.acceldata.openrewrite.spark.SparkAddMonthsUsageWarn;
 import com.acceldata.openrewrite.spark.SparkAnalysisExceptionPlanUsageDetect;
 import com.acceldata.openrewrite.spark.SparkCalendarIntervalUsageDetect;
+import com.acceldata.openrewrite.spark.SparkCompileBreakDetect;
+import com.acceldata.openrewrite.spark.SparkCompileBreakRewrite;
 import com.acceldata.openrewrite.spark.SparkDateTimeFormatPatternDetect;
 import com.acceldata.openrewrite.spark.SparkDuplicateMapKeyLiteralDetect;
 import com.acceldata.openrewrite.spark.SparkEmptyCollectionTypeDetect;
@@ -161,6 +163,16 @@ public final class RecipeCatalog {
         byId.put(SparkLog4j1UsageDetect.class.getName(), new SparkLog4j1UsageDetect());
         byId.put(SparkOneHotEncoderEstimatorUsageDetect.class.getName(), new SparkOneHotEncoderEstimatorUsageDetect());
         byId.put(SparkMllibSgdModelUsageDetect.class.getName(), new SparkMllibSgdModelUsageDetect());
+        // 2026-10-13: Spark 3.5.5 / JDK 17 compile breaks, one recipe per
+        // table row, each under its own SparkCompileBreakDetect.<Sub> id.
+        for (SparkCompileBreakDetect recipe : SparkCompileBreakDetect.all()) {
+            byId.put(recipe.getName(), recipe);
+        }
+        // 2026-10-14: the exact 3.5.5 form of the rows that have one
+        // (SparkCompileBreakRewrite.<Sub>); the detect rows report the rest.
+        for (SparkCompileBreakRewrite recipe : SparkCompileBreakRewrite.all()) {
+            byId.put(recipe.getName(), recipe);
+        }
         // Plumbing, not a migration finding of its own -- see its own doc
         // comment. JavaRuleRegistry does not carry an entry for this id;
         // JavaAnalysisRunner filters it out of the findings stream before

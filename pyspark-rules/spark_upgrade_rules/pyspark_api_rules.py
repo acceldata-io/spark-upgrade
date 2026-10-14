@@ -4,9 +4,11 @@ the three with an exact rewrite.
 The list of removals is not transcribed from a guide: it is every public name
 2.4.8's `python/pyspark` defines that a live 3.5.5 import no longer has,
 diffed module by module and member by member (spark-migrate-cli PYSPARK.md
-SS2.7). Three are covered elsewhere: `pyspark.streaming.kafka` and
-`pyspark.streaming.flume` are hard blockers on the JVM side, and the `Has*`
-mixins' setters are `MlSharedParamSetters` below.
+SS2.7), then the class attributes and parameter lists that diff skipped
+(spark-migrate-cli docs/triage-2026-10-13/api-pyspark.md). Three are covered
+elsewhere: `pyspark.streaming.kafka` and `pyspark.streaming.flume` are hard
+blockers on the JVM side, and the `Has*` mixins' setters are
+`MlSharedParamSetters` below.
 
 The rewrites:
 
@@ -17,8 +19,18 @@ The rewrites:
                          `pyspark.ml.param.shared.Has<Param>` mixin. The
                          method 2.4 inherited is added back to the class.
   RemovedPySparkApi      `OneHotEncoderEstimator` is `OneHotEncoder` since 3.0,
-                         same parameters; the pandas/pyarrow version checks
-                         moved to `pyspark.sql.pandas.utils`.
+                         same parameters; names imported from a module that
+                         no longer has them, where the same object lives on
+                         elsewhere (`_MOVED`: the pandas/pyarrow version
+                         checks, the Arrow type converters, PickleSerializer,
+                         pyspark.heapq3); `StorageLevel.*_SER`, which 2.4 aliased
+                         to the level without `_SER`; the `lag`/`lead`/
+                         `regexp_replace` keywords 3.x renamed; a
+                         `MulticlassMetrics` precision()/recall()/fMeasure()
+                         without a label, which is `accuracy`; and the mllib
+                         parameters 2.4 ignored and 3.x removed in place
+                         (`KMeans.train(runs)`, `MLUtils.loadLibSVMFile(multiclass)`),
+                         dropped.
 """
 from __future__ import annotations
 
@@ -204,6 +216,39 @@ class MlSharedParamSetters(Fixer):
 _MOVED = {
     ("pyspark.sql.utils", "require_minimum_pandas_version"): "pyspark.sql.pandas.utils",
     ("pyspark.sql.utils", "require_minimum_pyarrow_version"): "pyspark.sql.pandas.utils",
+    # 2.4's `pyspark/__init__` (and modules that imported it) re-exported the class.
+    ("pyspark", "PickleSerializer"): "pyspark.serializers",
+    ("pyspark.context", "PickleSerializer"): "pyspark.serializers",
+    ("pyspark.rdd", "PickleSerializer"): "pyspark.serializers",
+    ("pyspark.serializers", "ArrowStreamSerializer"): "pyspark.sql.pandas.serializers",
+    ("pyspark.sql.types", "to_arrow_type"): "pyspark.sql.pandas.types",
+    ("pyspark.sql.types", "to_arrow_schema"): "pyspark.sql.pandas.types",
+    ("pyspark.sql.types", "from_arrow_type"): "pyspark.sql.pandas.types",
+    ("pyspark.sql.types", "from_arrow_schema"): "pyspark.sql.pandas.types",
+    # 2.4 vendored Python 3's heapq for Python 2; same functions, same key/reverse.
+    ("pyspark.heapq3", "merge"): "heapq",
+    ("pyspark.heapq3", "nlargest"): "heapq",
+    ("pyspark.heapq3", "nsmallest"): "heapq",
+}
+# 3.0 made these ML base classes private (`_`-prefixed, most in pyspark.ml.tree).
+_PRIVATE_ML = {
+    ("pyspark.ml.classification", "GBTParams"): "pyspark.ml.tree._GBTParams",
+    ("pyspark.ml.regression", "GBTParams"): "pyspark.ml.tree._GBTParams",
+    ("pyspark.ml.classification", "TreeClassifierParams"): "pyspark.ml.tree._TreeClassifierParams",
+    ("pyspark.ml.classification", "OneVsRestParams"): "pyspark.ml.classification._OneVsRestParams",
+    ("pyspark.ml.classification", "JavaClassificationModel"): "pyspark.ml.classification._JavaClassificationModel",
+    ("pyspark.ml.regression", "DecisionTreeModel"): "pyspark.ml.tree._DecisionTreeModel",
+    ("pyspark.ml.regression", "RandomForestParams"): "pyspark.ml.tree._RandomForestParams",
+    ("pyspark.ml.regression", "TreeEnsembleModel"): "pyspark.ml.tree._TreeEnsembleModel",
+    ("pyspark.ml.regression", "TreeEnsembleParams"): "pyspark.ml.tree._TreeEnsembleParams",
+    ("pyspark.ml.regression", "TreeRegressorParams"): "pyspark.ml.tree._TreeRegressorParams",
+    ("pyspark.ml.tuning", "ValidatorParams"): "pyspark.ml.tuning._ValidatorParams",
+    ("pyspark.ml.feature", "LSHModel"): "pyspark.ml.feature._LSHModel",
+    ("pyspark.ml.feature", "LSHParams"): "pyspark.ml.feature._LSHParams",
+    ("pyspark.ml.fpm", "HasItemsCol"): "pyspark.ml.fpm._FPGrowthParams",
+    ("pyspark.ml.fpm", "HasMinConfidence"): "pyspark.ml.fpm._FPGrowthParams",
+    ("pyspark.ml.fpm", "HasMinSupport"): "pyspark.ml.fpm._FPGrowthParams",
+    ("pyspark.ml.fpm", "HasNumPartitions"): "pyspark.ml.fpm._FPGrowthParams",
 }
 _GONE = {
     ("pyspark.ml.param.shared", "DecisionTreeParams"):
@@ -220,7 +265,35 @@ _GONE = {
     ("pyspark.sql.utils", "install_exception_handler"):
         "moved to pyspark.errors.exceptions.captured in 3.4 (from pyspark.errors.exceptions.captured import "
         "install_exception_handler); an internal API -- it now converts to pyspark.errors exception classes",
+    ("pyspark", "heapq3"): "removed in 3.x -- use Python's own heapq (import heapq): same merge/nlargest/nsmallest",
+    ("pyspark.serializers", "ArrowStreamPandasSerializer"):
+        "moved to pyspark.sql.pandas.serializers in 3.0, and its constructor is now (timezone, safecheck) -- an internal "
+        "API; import it from there and pass safecheck",
+    **{key: f"made private in 3.0 ({private}) -- for an isinstance check use the public model classes (e.g. "
+            "GBTClassificationModel); a subclass has to build on the public estimator or model instead"
+       for key, private in _PRIVATE_ML.items()},
 }
+# Modules 3.5.5 no longer has, for `import <module>` (the `from` forms are in the tables above).
+# pyspark.streaming.kafka and .flume are spark-migrate-cli's DepUpgrade.EcosystemHardBlocker.
+_GONE_MODULES = {"pyspark.heapq3": "removed in 3.x -- use Python's own heapq (import heapq)"}
+
+# StorageLevel's serialized aliases: in 2.4 each was the same object as the
+# level without `_SER` (Python always stores pickled bytes); 3.x removed them.
+_SER_LEVELS = {"MEMORY_ONLY_SER": "MEMORY_ONLY", "MEMORY_ONLY_SER_2": "MEMORY_ONLY_2",
+               "MEMORY_AND_DISK_SER": "MEMORY_AND_DISK", "MEMORY_AND_DISK_SER_2": "MEMORY_AND_DISK_2"}
+STORAGE_LEVEL = ("pyspark.StorageLevel", "pyspark.storagelevel.StorageLevel")
+
+# pyspark.sql.functions keywords renamed between 2.4.8 and 3.5.5 -- every one
+# a signature diff of the module finds. Positional calls are unaffected.
+_RENAMED_KEYWORDS = {"lag": ("count", "offset"), "lead": ("count", "offset"), "regexp_replace": ("str", "string")}
+
+# Parameters 2.4 accepted and ignored, removed in 3.x: (name, positional index).
+# Passed by keyword it is a TypeError; positionally every later argument shifts.
+_REMOVED_PARAMS = {
+    "pyspark.mllib.clustering.KMeans.train": ("runs", 3),
+    "pyspark.mllib.util.MLUtils.loadLibSVMFile": ("multiclass", 4),
+}
+MULTICLASS_METRICS = "pyspark.mllib.evaluation.MulticlassMetrics"
 ENCODER_ESTIMATOR = "pyspark.ml.feature.OneHotEncoderEstimator"
 ENCODER = "pyspark.ml.feature.OneHotEncoder"
 
@@ -229,12 +302,17 @@ class RemovedPySparkApi(Fixer):
     """A 2.4 PySpark API that 3.5.5 does not have -- an ImportError or
     AttributeError the moment it runs. Rewritten where the replacement is the
     same thing under a new name: `OneHotEncoderEstimator` (3.0 renamed it
-    `OneHotEncoder`, same parameters and model), and the pandas/pyarrow
-    version checks, which moved to `pyspark.sql.pandas.utils`. Reported:
-    `KMeansModel.computeCost`, 2.4's transformer `OneHotEncoder` used
-    without `fit`, ML readers/writers' `.context(...)`, and imports of names
-    with no successor or whose successor is not a drop-in (`_GONE`, which
-    names the new import where there is one)."""
+    `OneHotEncoder`, same parameters and model), the names in `_MOVED`,
+    `StorageLevel.*_SER` (`_SER_LEVELS`), the renamed `pyspark.sql.functions`
+    keywords, `MulticlassMetrics(...).precision()`/`recall()`/`fMeasure()`
+    without a label (`.accuracy`), and the removed `KMeans.train(runs)` /
+    `MLUtils.loadLibSVMFile(multiclass)` argument, dropped unless its value
+    has a side effect. Reported: `KMeansModel.computeCost`, 2.4's
+    transformer `OneHotEncoder` used without `fit`, ML readers/writers'
+    `.context(...)`, imports of names with no successor or whose successor
+    is not a drop-in (`_GONE`, which names the new import where there is
+    one). Each of these was run on 2.4.8 and fails on 3.5.5; each rewrite
+    gives 2.4's result on 3.5.5."""
 
     rule_id = "RemovedPySparkApi"
 
@@ -248,6 +326,8 @@ class RemovedPySparkApi(Fixer):
                          if ctx.bindings.count.get(name) == 1 and isinstance(value, cst.Call)
                          and isinstance(value.func, cst.Name) and value.func.value == "OneHotEncoder"} \
             if self.has_encoder and "OneHotEncoderEstimator" not in imported else set()
+        self.metrics: set[str] = set()
+        self.not_metrics: set[str] = set()
 
     # -- imports
     def leave_ImportFrom(self, original_node: cst.ImportFrom, updated_node: cst.ImportFrom) -> cst.BaseSmallStatement:
@@ -266,10 +346,10 @@ class RemovedPySparkApi(Fixer):
                 target = _MOVED[(module, name)]
                 if len(original_node.names) == 1:
                     return self.rewrite(original_node, updated_node.with_changes(module=cst.parse_expression(target)),
-                                        f"{module}.{name} moved to {target} in Spark 3.0; importing it from {module} is an "
+                                        f"{module}.{name} moved to {target} in Spark 3.x; importing it from {module} is an "
                                         "ImportError on 3.5.5. Rewritten to import it from its new module.")
-                self.report(original_node, f"{module}.{name} moved to {target} in Spark 3.0 -- import it from there.",
-                            "high", tier=3)
+                self.report(original_node, f"{module}.{name} moved to {target} in Spark 3.x; importing it from {module} is an "
+                                           f"ImportError on 3.5.5 -- import it from {target}.", "high", tier=3)
         if module == "pyspark.ml.feature" and any(cst.helpers.get_full_name_for_node(a.name) == "OneHotEncoderEstimator"
                                                   for a in original_node.names):
             renamed = []
@@ -286,6 +366,21 @@ class RemovedPySparkApi(Fixer):
             return self.rewrite(original_node, updated_node.with_changes(names=renamed), self._encoder_message())
         return updated_node
 
+    def leave_Import(self, original_node: cst.Import, updated_node: cst.Import) -> cst.Import:
+        for alias in original_node.names:
+            module = cst.helpers.get_full_name_for_node(alias.name)
+            if module in _GONE_MODULES:
+                self.report(original_node, f"import {module}: {_GONE_MODULES[module]}. It is a ModuleNotFoundError on 3.5.5.",
+                            "high", tier=3)
+        return updated_node
+
+    def visit_Assign(self, node: cst.Assign) -> None:
+        # Names bound to MulticlassMetrics(...) anywhere, and to anything else.
+        for target in node.targets:
+            if isinstance(target.target, cst.Name):
+                multiclass = isinstance(node.value, cst.Call) and MULTICLASS_METRICS in self.qualified(node.value.func)
+                (self.metrics if multiclass else self.not_metrics).add(target.target.value)
+
     def _encoder_message(self) -> str:
         return ("OneHotEncoderEstimator was renamed OneHotEncoder in Spark 3.0 (the 2.4 transformer of that name was "
                 "removed); same parameters, same OneHotEncoderModel. Importing it is an ImportError on 3.5.5. Rewritten "
@@ -297,8 +392,14 @@ class RemovedPySparkApi(Fixer):
         return updated_node
 
     def leave_Attribute(self, original_node: cst.Attribute, updated_node: cst.Attribute) -> cst.BaseExpression:
-        if original_node.attr.value == "OneHotEncoderEstimator" and ENCODER_ESTIMATOR in self.qualified(original_node):
+        attr = original_node.attr.value
+        if attr == "OneHotEncoderEstimator" and ENCODER_ESTIMATOR in self.qualified(original_node):
             return self.rewrite(original_node, updated_node.with_changes(attr=cst.Name("OneHotEncoder")), self._encoder_message())
+        if attr in _SER_LEVELS and self.qualified(original_node.value) & set(STORAGE_LEVEL):
+            return self.rewrite(original_node, updated_node.with_changes(attr=cst.Name(_SER_LEVELS[attr])),
+                                f"StorageLevel.{attr} was removed in Spark 3.x -- an AttributeError on 3.5.5. In 2.4 it was "
+                                f"only an alias of StorageLevel.{_SER_LEVELS[attr]} (PySpark always stores serialized "
+                                f"data). Rewritten to StorageLevel.{_SER_LEVELS[attr]}, the same level.")
         return updated_node
 
     # -- calls
@@ -318,6 +419,59 @@ class RemovedPySparkApi(Fixer):
         elif name == "context" and isinstance(recv, cst.Call) and _cst.method_name(recv) in ("write", "read"):
             self.report(node, f".{_cst.method_name(recv)}().context(sqlContext) was removed from ML readers and writers "
                               "in Spark 3.0 -- use .session(spark).", "high", tier=3)
+
+    def leave_Call(self, original_node: cst.Call, updated_node: cst.Call) -> cst.BaseExpression:
+        name = _cst.method_name(original_node)
+        if name in ("precision", "recall", "fMeasure") and not original_node.args and \
+                self._is_multiclass_metrics(_cst.receiver(original_node)):
+            return self.rewrite(original_node, updated_node.func.with_changes(attr=cst.Name("accuracy")),
+                                f"MulticlassMetrics.{name}() without a label: 2.4 returned the overall {name} (deprecated "
+                                "since 2.0; it equals accuracy). Spark 3.x made the label required, so this is a TypeError "
+                                "on 3.5.5. Rewritten to the accuracy property, the same number.")
+        renamed = self.function(original_node, *_RENAMED_KEYWORDS)
+        if renamed:
+            old, new = _RENAMED_KEYWORDS[renamed]
+            if _cst.keyword(original_node, old) is not None:
+                args = [a.with_changes(keyword=cst.Name(new)) if a.keyword is not None and a.keyword.value == old else a
+                        for a in updated_node.args]
+                return self.rewrite(original_node, updated_node.with_changes(args=args),
+                                    f"{renamed}({old}=...): Spark 3.x renamed the parameter {new}, so the keyword {old}= is "
+                                    f"a TypeError on 3.5.5. Rewritten to {new}=, the same argument.")
+        removed = next((q for q in self.qualified(original_node.func) if q in _REMOVED_PARAMS), None)
+        if removed:
+            return self._drop_removed_param(original_node, updated_node, removed)
+        return updated_node
+
+    def _drop_removed_param(self, original_node: cst.Call, updated_node: cst.Call, removed: str) -> cst.BaseExpression:
+        """3.x deleted the parameter in place, so every later parameter kept its
+        name and moved up one position: dropping the argument binds the rest
+        exactly as 2.4 did. Not where the value it drops has a side effect."""
+        param, index = _REMOVED_PARAMS[removed]
+        call = removed.split(".", 3)[-1]
+        if _cst.keyword(original_node, param) is not None:
+            slot = next(i for i, a in enumerate(original_node.args) if a.keyword is not None and a.keyword.value == param)
+            what = f"{call}({param}=...): 2.4 ignored {param} and Spark 3.x removed it, so passing it is a TypeError on 3.5.5."
+        elif not _cst.has_star_args(original_node) and len(_cst.positional(original_node)) > index:
+            slot = index  # no *args, so positional i is args[i]
+            what = (f"{call}(...): positional argument {index + 1} is {param}, which 2.4 ignored and Spark 3.x removed, so "
+                    "on 3.5.5 every later argument lands one parameter early.")
+        else:
+            return updated_node
+        if not _pure(original_node.args[slot].value):
+            self.report(original_node, f"{what} Delete that argument -- not rewritten, as its value has a side effect "
+                                       "that deleting it would skip.", "high", tier=3)
+            return updated_node
+        args = list(updated_node.args)
+        dropped = args.pop(slot)
+        if slot == len(args) and args:  # it was the last argument: the one before takes its trailing comma, or none
+            args[-1] = args[-1].with_changes(comma=dropped.comma)
+        return self.rewrite(original_node, updated_node.with_changes(args=args),
+                            f"{what} Rewritten without it; the arguments after it bind the same parameters on 3.5.5.")
+
+    def _is_multiclass_metrics(self, node: cst.BaseExpression | None) -> bool:
+        if isinstance(node, cst.Call):
+            return MULTICLASS_METRICS in self.qualified(node.func)
+        return isinstance(node, cst.Name) and node.value in self.metrics and node.value not in self.not_metrics
 
     def _is_old_encoder(self, node: cst.BaseExpression | None) -> bool:
         if isinstance(node, cst.Name):

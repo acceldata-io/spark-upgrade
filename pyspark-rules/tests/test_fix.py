@@ -153,6 +153,145 @@ class RemovedApiTest(unittest.TestCase):
         self.assertIn("from pyspark.errors.exceptions.captured import capture_sql_exception", found[1]["message"])
         self.assertNotIn("removed", found[0]["message"] + found[1]["message"])
 
+    # The breaks below were each run on 2.4.8 and fail on 3.5.5; each rewrite
+    # was run on 3.5.5 and gives 2.4.8's values.
+    def _found(self, code):
+        module = cst.parse_module(HEADER + textwrap.dedent(code))
+        return [(f["line"] - 1, f["tier"], f["message"]) for f in detect(module, {self.rule})[0]]
+
+    def test_serialized_storage_levels(self):
+        code = """
+            import pyspark
+            from pyspark import StorageLevel
+            from pyspark.storagelevel import StorageLevel as SL
+            df.persist(StorageLevel.MEMORY_AND_DISK_SER)
+            rdd.persist(pyspark.StorageLevel.MEMORY_ONLY_SER_2)
+            x = SL.MEMORY_ONLY_SER
+            ok = StorageLevel.MEMORY_AND_DISK
+            other = Config.MEMORY_AND_DISK_SER
+        """
+        found = self._found(code)
+        self.assertEqual([f[:2] for f in found], [(5, 1), (6, 1), (7, 1)])
+        self.assertIn("Rewritten to StorageLevel.MEMORY_AND_DISK, the same level", found[0][2])
+        out = rewritten(code, self.rule)
+        for expected in ("df.persist(StorageLevel.MEMORY_AND_DISK)", "rdd.persist(pyspark.StorageLevel.MEMORY_ONLY_2)",
+                         "x = SL.MEMORY_ONLY\n", "other = Config.MEMORY_AND_DISK_SER"):
+            self.assertIn(expected, out)
+
+    def test_renamed_function_keywords(self):
+        code = """
+            from pyspark.sql.functions import lead
+            a = F.lag("k", count=1).over(w)
+            b = lead("k", count=2, default=0)
+            c = F.regexp_replace(str="v", pattern="[0-9]", replacement="")
+            ok = F.lag("k", 1)
+            ok2 = F.lag("k", offset=1)
+            ok3 = F.count("k")
+            ok4 = other.lag("k", count=1)
+        """
+        found = self._found(code)
+        self.assertEqual([f[:2] for f in found], [(3, 1), (4, 1), (5, 1)])
+        self.assertIn("Rewritten to offset=", found[0][2])
+        out = rewritten(code, self.rule)
+        for expected in ('a = F.lag("k", offset=1).over(w)', 'b = lead("k", offset=2, default=0)',
+                         'c = F.regexp_replace(string="v", pattern="[0-9]", replacement="")',
+                         'ok3 = F.count("k")', 'ok4 = other.lag("k", count=1)'):
+            self.assertIn(expected, out)
+
+    def test_star_imported_function_keyword(self):
+        module = cst.parse_module("from pyspark.sql.functions import *\nx = lag('k', count=1)\n")
+        self.assertEqual([(f["line"], f["tier"]) for f in detect(module, {self.rule})[0]], [(2, 1)])
+        self.assertIn("x = lag('k', offset=1)", fix(module, {self.rule})[0])
+
+    def test_removed_mllib_parameters(self):
+        code = """
+            from pyspark.mllib.clustering import KMeans
+            from pyspark.mllib.util import MLUtils
+            m1 = KMeans.train(rdd, 2, runs=10)
+            m2 = KMeans.train(rdd, 2, 20, 10, "random", seed=7)
+            d = MLUtils.loadLibSVMFile(sc, p, multiclass=True)
+            d2 = MLUtils.loadLibSVMFile(sc, p, -1, None, True)
+            m3 = KMeans.train(rdd, 2, 20, runs=10, seed=7)
+            ok = KMeans.train(rdd, 2, 20, initializationMode="random")
+            ok2 = KMeans.train(*args)
+            ok3 = KMeans.train(rdd, 2, *rest)
+        """
+        found = self._found(code)
+        self.assertEqual([f[:2] for f in found], [(4, 1), (5, 1), (6, 1), (7, 1), (8, 1)])
+        self.assertIn("positional argument 4 is runs", found[1][2])
+        out = rewritten(code, self.rule)
+        for expected in ("m1 = KMeans.train(rdd, 2)", 'm2 = KMeans.train(rdd, 2, 20, "random", seed=7)',
+                         "d = MLUtils.loadLibSVMFile(sc, p)", "d2 = MLUtils.loadLibSVMFile(sc, p, -1, None)",
+                         "m3 = KMeans.train(rdd, 2, 20, seed=7)", "ok3 = KMeans.train(rdd, 2, *rest)"):
+            self.assertIn(expected, out)
+
+    def test_removed_mllib_parameter_with_a_side_effect_stays_manual(self):
+        code = """
+            from pyspark.mllib.clustering import KMeans
+            m = KMeans.train(rdd, 2, 20, next(runs), "random")
+            m2 = KMeans.train(rdd, 2, runs=pick())
+        """
+        found = self._found(code)
+        self.assertEqual([f[:2] for f in found], [(3, 3), (4, 3)])
+        self.assertIn("side effect", found[0][2])
+        out = rewritten(code, self.rule)
+        self.assertIn('KMeans.train(rdd, 2, 20, next(runs), "random")', out)
+        self.assertIn("KMeans.train(rdd, 2, runs=pick())", out)
+
+    def test_multiline_trailing_argument(self):
+        code = """
+            from pyspark.mllib.util import MLUtils
+            d = MLUtils.loadLibSVMFile(
+                sc,
+                p,
+                multiclass=True,
+            )
+        """
+        self.assertIn("    sc,\n    p,\n)", rewritten(code, self.rule))
+
+    def test_multiclass_metrics_without_label(self):
+        code = """
+            from pyspark.mllib.evaluation import MulticlassMetrics, MultilabelMetrics
+            metrics = MulticlassMetrics(pairs)
+            p = metrics.precision()
+            r = MulticlassMetrics(pairs).recall()
+            f = metrics.fMeasure()
+            ok = metrics.precision(1.0)
+            ok2 = metrics.accuracy
+            labels = MultilabelMetrics(pairs)
+            ok3 = labels.precision()
+            ok4 = unknown.precision()
+            ok5 = metrics.fMeasure(beta=0.5)
+        """
+        found = self._found(code)
+        self.assertEqual([f[:2] for f in found], [(4, 1), (5, 1), (6, 1)])
+        self.assertIn("Rewritten to the accuracy property", found[0][2])
+        out = rewritten(code, self.rule)
+        for expected in ("p = metrics.accuracy\n", "r = MulticlassMetrics(pairs).accuracy\n", "f = metrics.accuracy\n",
+                         "ok = metrics.precision(1.0)", "ok3 = labels.precision()", "ok4 = unknown.precision()",
+                         "ok5 = metrics.fMeasure(beta=0.5)"):
+            self.assertIn(expected, out)
+
+    def test_moved_imports_are_rewritten(self):
+        code = """
+            from pyspark import PickleSerializer
+            from pyspark.sql.types import to_arrow_type
+            from pyspark.heapq3 import merge
+            from pyspark.sql.types import StructType, from_arrow_schema
+            from pyspark import heapq3
+            import pyspark.heapq3
+            from pyspark.ml.regression import TreeEnsembleModel
+            from pyspark.serializers import ArrowStreamPandasSerializer
+        """
+        found = self._found(code)
+        self.assertEqual([f[:2] for f in found], [(2, 1), (3, 1), (4, 1), (5, 3), (6, 3), (7, 3), (8, 3), (9, 3)])
+        self.assertIn("pyspark.ml.tree._TreeEnsembleModel", found[6][2])
+        out = rewritten(code, self.rule)
+        self.assertIn("from pyspark.serializers import PickleSerializer", out)
+        self.assertIn("from pyspark.sql.pandas.types import to_arrow_type", out)
+        self.assertIn("from heapq import merge", out)
+        self.assertIn("from pyspark.sql.types import StructType, from_arrow_schema", out, "a mixed line is reported, not split")
+
 
 class AddMonthsSnapTest(unittest.TestCase):
     """Each rewritten shape was run on 3.5.5 and matched plain add_months on

@@ -15,7 +15,8 @@ inThisBuild(
     homepage := Some(url("https://github.com/holdenk/spark-auto-upgrade")),
     licenses := List("Apache-2.0" -> url("http://www.apache.org/licenses/LICENSE-2.0")),
     srcSparkVersion := System.getProperty("sparkVersion", "2.4.8"),
-    targetSparkVersion := System.getProperty("targetSparkVersion", "3.3.0"),
+    // 3.5.5, the migration's target: some outputs (ExpressionEncoder(schema)) only exist there.
+    targetSparkVersion := System.getProperty("targetSparkVersion", "3.5.5"),
     sparkVersion := srcSparkVersion.value,
     // actual version is pulled from tags.
     sparkUpgradeVersion := "0.0.1-SNAPSHOT", // dev version for testing.
@@ -83,6 +84,16 @@ lazy val input = project.settings(
     "org.scalatest" %% "scalatest" % "3.0.0")
 )
 
+// Scala 2.11 input, for shapes that do not compile on 2.12 even against Spark
+// 2.4.8 (an untyped lambda passed to foreachPartition/foreachBatch). Its
+// outputs live in `output` with the others; `tests211` runs them.
+lazy val input211 = project.settings(
+  skip in publish := true,
+  scalaVersion := V.scala211,
+  crossScalaVersions := List(V.scala211),
+  libraryDependencies ++= Seq("core", "sql", "mllib", "avro").map(m => "org.apache.spark" %% s"spark-$m" % srcSparkVersion.value)
+)
+
 lazy val output = project.settings(
   skip in publish := true,
   sparkVersion := targetSparkVersion.value,
@@ -115,6 +126,22 @@ lazy val tests = project
       sourceDirectories.in(input, Compile).value,
     scalafixTestkitInputClasspath :=
       fullClasspath.in(input, Compile).value,
+  )
+  .dependsOn(rules)
+  .enablePlugins(ScalafixTestkitPlugin)
+  .aggregate(tests211)
+
+lazy val tests211 = project
+  .settings(
+    skip in publish := true,
+    libraryDependencies += "ch.epfl.scala" % "scalafix-testkit" % V.scalafixVersion % Test cross CrossVersion.full,
+    Test / unmanagedSourceDirectories := Seq((ThisBuild / baseDirectory).value / "tests/src/test/scala"),
+    compile.in(Compile) :=
+      compile.in(Compile).dependsOn(compile.in(input211, Compile), compile.in(output, Compile)).value,
+    scalafixTestkitOutputSourceDirectories := sourceDirectories.in(output, Compile).value,
+    scalafixTestkitInputSourceDirectories := sourceDirectories.in(input211, Compile).value,
+    scalafixTestkitInputClasspath := fullClasspath.in(input211, Compile).value,
+    scalafixTestkitInputScalaVersion := scalaVersion.in(input211).value
   )
   .dependsOn(rules)
   .enablePlugins(ScalafixTestkitPlugin)
