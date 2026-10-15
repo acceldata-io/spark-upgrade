@@ -72,7 +72,7 @@ object RuleRegistry {
     RuleMeta(
       ruleId = "UnionRewrite",
       tier = 1,
-      description = "Dataset/DataFrame.unionAll is deprecated; use union instead (identical semantics).",
+      description = "Dataset/DataFrame.unionAll is an alias of union (not deprecated in 2.4 or 3.5.5); renamed to union, the name the docs use. Identical semantics.",
       docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
       defaultConfidence = "high"
     ),
@@ -173,7 +173,7 @@ object RuleRegistry {
     RuleMeta(
       ruleId = "MigrateHiveContext",
       tier = 1,
-      description = "HiveContext is removed; rewrites construction call sites, the plain-HiveContext import, and bare HiveContext type references to SparkSession.builder.enableHiveSupport().getOrCreate().sqlContext / SQLContext. Exact and semantics-preserving in the construction/import cases (verified against the real 2.4.8 and 3.5.5 jars); the type-reference case carries a narrow residual risk (a Hive-specific method called on the retyped reference), backstopped by the compile gate like every other Tier 1 rewrite.",
+      description = "HiveContext has been deprecated since Spark 2.0 (it still compiles on 3.5.5, with a warning); rewrites construction call sites, the plain-HiveContext import, and bare HiveContext type references to SparkSession.builder.enableHiveSupport().getOrCreate().sqlContext / SQLContext. Exact and semantics-preserving in the construction/import cases (verified against the real 2.4.8 and 3.5.5 jars); the type-reference case carries a narrow residual risk (a Hive-specific method called on the retyped reference), backstopped by the compile gate like every other Tier 1 rewrite.",
       docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
       defaultConfidence = "high"
     ),
@@ -208,7 +208,7 @@ object RuleRegistry {
     RuleMeta(
       ruleId = "SparkSQLCallExternal",
       tier = 1,
-      description = "Runs the sqlfluff sparksql-upgrade plugin's Family K rule set (13 rules -- CAST, reserved properties, CHAR, format_string, EXTRACT SECOND, percentile_approx, GLOBAL TEMP VIEW, histogram_numeric, lpad/rpad, to_binary/unbase64, CTE precedence, PARTITION literals, TRANSFORM) against a literal SQL string passed to spark.sql(...)/sqlContext.sql(...): auto-rewrites the 3 audited fix codes (FORMATSTRONEINDEX_L004, SPARKSQL_L004, SPARKSQL_L005) only when the whole literal is fixed (a re-lint shows none of them, no new code, no parse error), otherwise reports them as <code>.Manual (Tier 3); reports the other codes as findings. Requires sqlfluff + the plugin on PATH; falls back to no findings if unavailable or if the process fails.",
+      description = "Runs the sqlfluff sparksql-upgrade plugin's Family K rule set (17 rules -- CAST, reserved properties, CHAR, format_string, EXTRACT SECOND, percentile_approx, GLOBAL TEMP VIEW, histogram_numeric, lpad/rpad, to_binary/unbase64, CTE precedence, PARTITION literals, TRANSFORM, date/string comparison, CTAS location (data source and Hive), recursive temp view) against a literal SQL string passed to spark.sql(...)/sqlContext.sql(...): auto-rewrites the 3 audited fix codes (FORMATSTRONEINDEX_L004, SPARKSQL_L004, SPARKSQL_L005) only when the whole literal is fixed (a re-lint shows none of them, no new code, no parse error), otherwise reports them as <code>.Manual (Tier 3); reports the other codes as findings. Requires sqlfluff + the plugin on PATH; falls back to no findings if unavailable or if the process fails.",
       docLink = "https://docs.sqlfluff.com/en/stable/dialects.html",
       defaultConfidence = "high"
     ),
@@ -494,7 +494,7 @@ object RuleRegistry {
     RuleMeta(
       ruleId = "CalendarIntervalUsageDetect.Manual",
       tier = 3,
-      description = "References to CalendarInterval: from Spark 3.0 an interval has separate months, days and microseconds fields, and from 3.2 date/timestamp subtraction yields DayTimeIntervalType, so code typed against CalendarInterval or reading its fields no longer type-checks or silently reads different numbers.",
+      description = "References to CalendarInterval: Spark 3.0 added a days field and removed the (months, microseconds) constructor, the MICROS_PER_* constants, the from*String parsers, milliseconds(), add, subtract and negate, so code calling those no longer compiles and code reading microseconds silently gets different numbers.",
       docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
       defaultConfidence = "medium"
     ),
@@ -522,6 +522,20 @@ object RuleRegistry {
       description = "Flags a JSON read with an explicit schema; from Spark 3.0 an empty string is rejected for non-string fields instead of being read as null. Feeds spark.sql.legacy.json.allowEmptyString.enabled.",
       docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
       defaultConfidence = "medium"
+    ),
+    RuleMeta(
+      ruleId = "DateTimeStringComparisonDetect",
+      tier = 2,
+      description = "Flags a Column comparison with a date-shaped string literal where a probe showed the answer can differ: Spark 3.0 casts the string to date/timestamp, where 2.4 cast the date/timestamp to string. ts > \"2020-01-01\" kept midnight rows on 2.4 and drops them on 3.x; d === \"2020-1-1\" matched nothing on 2.4. A zero-padded date under ===, =!=, <, >= is not flagged (same answer). Feeds spark.sql.legacy.typeCoercion.datetimeToString.enabled.",
+      docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
+      defaultConfidence = "medium"
+    ),
+    RuleMeta(
+      ruleId = "SaveAsTablePathDetect",
+      tier = 2,
+      description = "Flags saveAsTable with a `path` option in ErrorIfExists (default) mode; from Spark 3.2 it fails when the location is a non-empty directory, where 2.4 overwrote it. Feeds spark.sql.legacy.allowNonEmptyLocationInCTAS.",
+      docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
+      defaultConfidence = "high"
     ),
     RuleMeta(
       ruleId = "StoreAssignmentPolicyDetect",
@@ -666,6 +680,34 @@ object RuleRegistry {
       defaultConfidence = "low"
     ),
     RuleMeta(
+      ruleId = "SparkSQLCallExternal.DATESTRCOMPARE_L013",
+      tier = 2,
+      description = "sqlfluff plugin: a date-shaped string literal compared where a probe showed the answer can differ. Spark 3.0 casts the string to the other side's date or timestamp type, 2.4 cast the date or timestamp to a string: ts > '2020-01-01' kept midnight rows on 2.4 and drops them on 3.x; d = '2020-1-1' matched nothing on 2.4. Feeds spark.sql.legacy.typeCoercion.datetimeToString.enabled.",
+      docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
+      defaultConfidence = "medium"
+    ),
+    RuleMeta(
+      ruleId = "SparkSQLCallExternal.CTASLOCATION_L014",
+      tier = 2,
+      description = "sqlfluff plugin: CREATE TABLE ... USING ... LOCATION (or OPTIONS path) ... AS SELECT. From Spark 3.2 it fails when the location already holds files; 2.4 replaced them. Feeds spark.sql.legacy.allowNonEmptyLocationInCTAS.",
+      docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
+      defaultConfidence = "high"
+    ),
+    RuleMeta(
+      ruleId = "SparkSQLCallExternal.HIVECTASLOCATION_L015",
+      tier = 3,
+      description = "sqlfluff plugin: a Hive-format CREATE TABLE ... LOCATION ... AS SELECT (no USING). From Spark 3.2 it fails when the location already holds files; 2.4 replaced them. No config restores 2.4 here; delete the location's files before the CTAS.",
+      docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
+      defaultConfidence = "high"
+    ),
+    RuleMeta(
+      ruleId = "SparkSQLCallExternal.RECURSIVEVIEW_L016",
+      tier = 2,
+      description = "sqlfluff plugin: a temp view defined in terms of its previous definition (CREATE OR REPLACE TEMP VIEW v AS ... FROM v). 2.4 used the old view; Spark 3.1+ fails with RECURSIVE_VIEW. Feeds spark.sql.legacy.storeAnalyzedPlanForView.",
+      docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
+      defaultConfidence = "high"
+    ),
+    RuleMeta(
       ruleId = "SparkSQLCallExternal.UNPARSEABLE",
       tier = 3,
       description = "sqlfluff's sparksql dialect could not parse a literal SQL string, so none of the Family K SQL rules were evaluated against it -- the absence of SQL findings for that literal means 'not checked', not 'clean'.",
@@ -690,7 +732,7 @@ object RuleRegistry {
     RuleMeta(
       ruleId = "ProcedureSyntaxDetect",
       tier = 1,
-      description = "Procedure syntax (def f() { ... }, no `=`) is deprecated in Scala 2.12 and removed in 2.13; rewrites to def f(): Unit = { ... }.",
+      description = "Procedure syntax (def f() { ... }, no `=`) still compiles on Scala 2.12 but is deprecated in 2.13 and dropped in Scala 3; rewrites to def f(): Unit = { ... }.",
       docLink = "https://docs.scala-lang.org/scala3/guides/migration/incompat-syntactic.html#procedure-syntax",
       defaultConfidence = "high"
     ),

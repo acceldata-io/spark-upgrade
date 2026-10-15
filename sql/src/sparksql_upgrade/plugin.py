@@ -26,6 +26,10 @@ def get_rules() -> List[BaseRule]:
         Rule_CTEPRECEDENCE_L010,
         Rule_TYPEDPARTITION_L011,
         Rule_TRANSFORMDELIM_L012,
+        Rule_DATESTRCOMPARE_L013,
+        Rule_CTASLOCATION_L014,
+        Rule_HIVECTASLOCATION_L015,
+        Rule_RECURSIVEVIEW_L016,
     )
 
     return [
@@ -42,6 +46,10 @@ def get_rules() -> List[BaseRule]:
         Rule_CTEPRECEDENCE_L010,
         Rule_TYPEDPARTITION_L011,
         Rule_TRANSFORMDELIM_L012,
+        Rule_DATESTRCOMPARE_L013,
+        Rule_CTASLOCATION_L014,
+        Rule_HIVECTASLOCATION_L015,
+        Rule_RECURSIVEVIEW_L016,
     ]
 
 

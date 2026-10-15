@@ -28,7 +28,7 @@ class SparkCalendarIntervalUsageDetectTest implements RewriteTest {
                         import org.apache.spark.unsafe.types.CalendarInterval;
 
                         class Intervals {
-                            /*~~(CalendarInterval is referenced here. From Spark 3.2, subtracting two dates or two timestamps produces DayTimeIntervalType, not CalendarIntervalType -- so code that stores, casts or checks the result as CalendarInterval no longer type-checks.)~~>*/CalendarInterval interval;
+                            /*~~(CalendarInterval is referenced here. Spark 3.0 added a days field and removed the (months, microseconds) constructor, the MICROS_PER_* constants, the from*String parsers, milliseconds(), add, subtract and negate: code calling those no longer compiles, and code reading microseconds silently gets different numbers.)~~>*/CalendarInterval interval;
                         }
                         """
                 )
@@ -70,7 +70,7 @@ class SparkCalendarIntervalUsageDetectTest implements RewriteTest {
 
                         class Intervals {
                             Column grace() {
-                                return lit(new org.apache.spark.unsafe.types./*~~(CalendarInterval is referenced here. From Spark 3.2, subtracting two dates or two timestamps produces DayTimeIntervalType, not CalendarIntervalType -- so code that stores, casts or checks the result as CalendarInterval no longer type-checks.)~~>*/CalendarInterval(0, 3600000000L));
+                                return lit(new org.apache.spark.unsafe.types./*~~(CalendarInterval is referenced here. Spark 3.0 added a days field and removed the (months, microseconds) constructor, the MICROS_PER_* constants, the from*String parsers, milliseconds(), add, subtract and negate: code calling those no longer compiles, and code reading microseconds silently gets different numbers.)~~>*/CalendarInterval(0, 3600000000L));
                             }
                         }
                         """

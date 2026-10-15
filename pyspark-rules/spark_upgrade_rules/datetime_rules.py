@@ -464,3 +464,111 @@ class DateTimeStrictParsingDetect(DateTimeFormatPatternValidator):
                           "padding ('2020-1-5' for yyyy-MM-dd), with trailing text ('2020-01-05 10:00') or a leading space "
                           "throws SparkUpgradeException under the default spark.sql.legacy.timeParserPolicy=EXCEPTION. "
                           "spark.sql.legacy.timeParserPolicy=LEGACY parses exactly as 2.4 did.", "low")
+
+
+# ---- a date or timestamp compared with a string ---------------------------------
+
+_DATE_STRING = re.compile(r"\d{4}-\d{1,2}-\d{1,2}(?:[ T]\d{1,2}:\d{1,2}(?::\d{1,2}(?:\.\d{1,9})?)?)?")
+_CANONICAL_DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
+_OPERATORS = {cst.Equal: "==", cst.NotEqual: "!=", cst.LessThan: "<", cst.LessThanEqual: "<=",
+              cst.GreaterThan: ">", cst.GreaterThanEqual: ">="}
+_MIRRORED = {"<": ">", ">": "<", "<=": ">=", ">=": "<="}
+# Calls whose arguments are column conditions: a comparison inside one is a Column's.
+_CONDITIONS = ("filter", "where", "when")
+
+
+def date_string_comparison_changes(literal: str, operator: str) -> bool:
+    """The sqlfluff plugin's DATESTRCOMPARE_L013 test, for a column on the left
+    of `operator` ("between_lo"/"between_hi" for a bound). Probed on 2.4.8 and
+    3.5.5, SQL and the Column API alike: 2.4 compared a date with a string as
+    strings, and a timestamp too except under ==/eqNullSafe; 3.x casts the
+    string. A zero-padded 'yyyy-MM-dd' changes only a timestamp under > or <=
+    (or a between upper bound); any other date-shaped string can change every
+    operator on a date column. isin is unchanged."""
+    if not _DATE_STRING.fullmatch(literal):
+        return False
+    return not _CANONICAL_DATE.fullmatch(literal) or operator in (">", "<=", "between_hi")
+
+
+class DateTimeStringComparisonDetect(Detector):
+    """Port of the Scala rule of the same id: a Column compared with a
+    date-shaped string, directly, through `lit(...)` or a name bound once:
+    `F.col("ts") > "2020-01-01"`, `.between(...)`, `.eqNullSafe(...)`.
+    Spark 3.0 casts the string to the column's date or timestamp type; 2.4
+    cast the column to a string. Only the literal/operator pairs that can
+    change the answer are flagged (`date_string_comparison_changes`). The
+    other side must be a Column: a `pyspark.sql.functions` call (and methods
+    on one), or -- inside filter/where/when -- any expression, since a
+    comparison there builds a Column. SQL text is the sqlfluff plugin's."""
+
+    rule_id = "DateTimeStringComparisonDetect"
+
+    def __init__(self, ctx) -> None:
+        super().__init__(ctx)
+        self._conditions = 0
+        self._lambdas = 0
+
+    def _is_condition(self, node: cst.Call) -> bool:
+        return _cst.method_name(node) in _CONDITIONS or self.function(node, "when") is not None
+
+    def _date_string(self, node: cst.BaseExpression) -> str | None:
+        """A date-shaped string literal, bare or in lit(...), or a name bound once to one."""
+        if isinstance(node, cst.Call) and self.function(node, "lit"):
+            node = _cst.argument(node, 0, "col")
+        text = self.string(node)
+        return text if text is not None and _DATE_STRING.fullmatch(text) else None
+
+    def _is_column(self, node: cst.BaseExpression) -> bool:
+        # An RDD's filter(lambda r: r.d > "...") compares Python strings.
+        if self._conditions and not self._lambdas:
+            return True
+        # A pyspark.sql.functions call, or a method chained on one.
+        return any(isinstance(n, cst.Call) and (self.function(n, "col", "column") is not None or
+                                                any(q.startswith(_cst.FUNCTIONS + ".") for q in self.qualified(n.func)))
+                   for n in _cst.spine(node))
+
+    def _check(self, node: cst.CSTNode, column: cst.BaseExpression, value: cst.BaseExpression | None, operator: str,
+               column_known: bool = False) -> None:
+        literal = self._date_string(value)
+        if literal is None or not date_string_comparison_changes(literal, operator):
+            return
+        # lit(...) makes the comparison a Column's whatever the other side is.
+        if not (column_known or isinstance(value, cst.Call) or self._is_column(column)):
+            return
+        self.report(node, f"A column compared with the string '{literal}'. If the column is a date or timestamp, Spark 3.x "
+                          "casts the string to its type, where 2.4 cast the column to a string (except a timestamp under == "
+                          "and eqNullSafe), so the rows selected can change silently: col('ts') > '2020-01-01' kept midnight "
+                          "rows on 2.4 and drops them on 3.x; col('d') == '2020-1-1' matched nothing on 2.4. "
+                          "spark.sql.legacy.typeCoercion.datetimeToString.enabled=true restores 2.4 and is injected (a date "
+                          "partition column compared with a string is then no longer pruned). To drop it, compare with "
+                          "to_date(lit(...))/to_timestamp(lit(...)), stating the comparison you mean.", "medium")
+
+    def visit_Comparison(self, node: cst.Comparison) -> None:
+        left = node.left
+        for target in node.comparisons:
+            operator = _OPERATORS.get(type(target.operator))
+            if operator is not None:
+                self._check(node, left, target.comparator, operator)
+                self._check(node, target.comparator, left, _MIRRORED.get(operator, operator))
+            left = target.comparator
+
+    def visit_Call(self, node: cst.Call) -> None:
+        name = _cst.method_name(node)
+        receiver = _cst.receiver(node)
+        if name == "between" and receiver is not None:
+            self._check(node, receiver, _cst.argument(node, 0, "lowerBound"), "between_lo")
+            self._check(node, receiver, _cst.argument(node, 1, "upperBound"), "between_hi")
+        elif name == "eqNullSafe" and receiver is not None:
+            self._check(node, receiver, _cst.argument(node, 0, "other"), "==", column_known=True)
+        if self._is_condition(node):
+            self._conditions += 1
+
+    def leave_Call(self, original_node: cst.Call) -> None:
+        if self._is_condition(original_node):
+            self._conditions -= 1
+
+    def visit_Lambda(self, node: cst.Lambda) -> None:
+        self._lambdas += 1
+
+    def leave_Lambda(self, original_node: cst.Lambda) -> None:
+        self._lambdas -= 1

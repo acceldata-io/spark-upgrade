@@ -12,6 +12,7 @@ import com.acceldata.openrewrite.spark.SparkCalendarIntervalUsageDetect;
 import com.acceldata.openrewrite.spark.SparkCompileBreakDetect;
 import com.acceldata.openrewrite.spark.SparkCompileBreakRewrite;
 import com.acceldata.openrewrite.spark.SparkDateTimeFormatPatternDetect;
+import com.acceldata.openrewrite.spark.SparkDateTimeStringComparisonDetect;
 import com.acceldata.openrewrite.spark.SparkDuplicateMapKeyLiteralDetect;
 import com.acceldata.openrewrite.spark.SparkEmptyCollectionTypeDetect;
 import com.acceldata.openrewrite.spark.SparkExecutorPluginDetect;
@@ -30,6 +31,7 @@ import com.acceldata.openrewrite.spark.SparkNegativeDecimalScaleDetect;
 import com.acceldata.openrewrite.spark.SparkOneHotEncoderEstimatorUsageDetect;
 import com.acceldata.openrewrite.spark.SparkPathOptionConflictDetect;
 import com.acceldata.openrewrite.spark.SparkProcessingTimeDetect;
+import com.acceldata.openrewrite.spark.SparkSaveAsTablePathDetect;
 import com.acceldata.openrewrite.spark.SparkSelfJoinAmbiguousDetect;
 import com.acceldata.openrewrite.spark.SparkShuffleWriteMetricsRename;
 import com.acceldata.openrewrite.spark.SparkSqlContextConstructorDetect;
@@ -136,6 +138,8 @@ public final class RecipeCatalog {
         byId.put(SparkIsRunningLocallyDetect.class.getName(), new SparkIsRunningLocallyDetect());
         byId.put(SparkJsonEmptyStringDetect.class.getName(), new SparkJsonEmptyStringDetect());
         byId.put(SparkStoreAssignmentPolicyDetect.class.getName(), new SparkStoreAssignmentPolicyDetect());
+        byId.put(SparkDateTimeStringComparisonDetect.class.getName(), new SparkDateTimeStringComparisonDetect());
+        byId.put(SparkSaveAsTablePathDetect.class.getName(), new SparkSaveAsTablePathDetect());
         byId.put(SparkCalendarIntervalUsageDetect.class.getName(), new SparkCalendarIntervalUsageDetect());
         byId.put(SparkInvalidTimeZoneIdDetect.class.getName(), new SparkInvalidTimeZoneIdDetect());
         // 2026-09-29 coverage review batch -- all Tier 3, detect-only, per

@@ -1,0 +1,29 @@
+rule: HIVECTASLOCATION_L015
+
+hive_ctas_location_flagged:
+  configs:
+    core:
+      dialect: sparksql
+  fail_str: |
+    CREATE TABLE t STORED AS PARQUET LOCATION '/data/t' AS SELECT * FROM s
+
+default_format_ctas_location_flagged:
+  configs:
+    core:
+      dialect: sparksql
+  fail_str: |
+    CREATE TABLE t LOCATION '/data/t' AS SELECT * FROM s
+
+hive_ctas_without_location_ok:
+  configs:
+    core:
+      dialect: sparksql
+  pass_str: |
+    CREATE TABLE t STORED AS PARQUET AS SELECT * FROM s
+
+datasource_ctas_is_l014_not_this_ok:
+  configs:
+    core:
+      dialect: sparksql
+  pass_str: |
+    CREATE TABLE t USING parquet LOCATION '/data/t' AS SELECT * FROM s

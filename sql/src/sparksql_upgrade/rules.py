@@ -742,3 +742,226 @@ class Rule_TRANSFORMDELIM_L012(BaseRule):
             "script's actual I/O format. See "
             "https://spark.apache.org/docs/latest/sql-migration-guide.html",
         )
+
+
+# A date, optionally with a time: what Spark 3.x casts a compared string to.
+_DATE_STRING = re.compile(r"\d{4}-\d{1,2}-\d{1,2}(?:[ T]\d{1,2}:\d{1,2}(?::\d{1,2}(?:\.\d{1,9})?)?)?")
+_CANONICAL_DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
+# The operator seen from the column's side when the literal is on the left.
+_MIRRORED = {"<": ">", ">": "<", "<=": ">=", ">=": "<="}
+
+
+def date_string_comparison_changes(literal: str, operator: str) -> bool:
+    """Whether comparing a date or timestamp column to the string `literal`
+    with `operator` (the column on the left; "BETWEEN_LO"/"BETWEEN_HI" for a
+    bound) can give a different answer on Spark 3.x than on 2.4.
+
+    Probed on 2.4.8 and 3.5.5 over every operator: 2.4 compared a date to the
+    string as strings, and a timestamp too except under = and <=>, which cast
+    the string to a timestamp. 3.x casts the string to the column's type. So
+    a zero-padded 'yyyy-MM-dd' literal changes only a timestamp compared with
+    > or <= (or a BETWEEN upper bound): 2.4 ordered '2020-01-01 00:00:00'
+    after '2020-01-01'. Any other date-shaped literal ('2020-1-1', one with a
+    time) can change every operator on a date column. IN is unchanged.
+    """
+    if not _DATE_STRING.fullmatch(literal):
+        return False
+    if not _CANONICAL_DATE.fullmatch(literal):
+        return True
+    return operator in (">", "<=", "BETWEEN_HI")
+
+
+class Rule_DATESTRCOMPARE_L013(BaseRule):
+    """Spark 3.0 compares a date or timestamp with a string as a date or timestamp.
+
+    2.4 cast the date or timestamp to a string and compared strings (except
+    a timestamp under = and <=>); 3.x casts the string to the column's type.
+    The answer changes silently: ``ts > '2020-01-01'`` keeps midnight rows on
+    2.4 and drops them on 3.x, and ``d = '2020-1-1'`` matched nothing on 2.4
+    and matches 2020-01-01 on 3.x. Without types the literal is the evidence:
+    only the literal/operator pairs a probe showed can change are flagged
+    (``date_string_comparison_changes``), so the common
+    ``dt = '2020-01-01'`` is not. Feeds
+    ``spark.sql.legacy.typeCoercion.datetimeToString.enabled``, which gave
+    2.4.8's rows for every pair probed on 3.5.5.
+
+    **Flagged**
+
+    .. code-block:: sql
+
+        SELECT * FROM t WHERE ts > '2020-01-01' OR d = '2020-1-1'
+    """
+
+    groups = ("all",)
+    crawl_behaviour = SegmentSeekerCrawler({"quoted_literal"})
+    is_fix_compatible = False
+
+    def _eval(self, context: RuleContext) -> Optional[LintResult]:
+        parent = context.parent_stack[-1] if context.parent_stack else None
+        if parent is None or not parent.is_type("expression"):
+            return None
+        code = [s for s in parent.segments if s.is_code]
+        i = next(k for k, s in enumerate(code) if s is context.segment)
+        before = code[i - 1] if i > 0 else None
+        after = code[i + 1] if i + 1 < len(code) else None
+        if before is not None and before.is_type("comparison_operator"):
+            operator = "".join(before.raw.split())
+        elif after is not None and after.is_type("comparison_operator"):
+            operator = "".join(after.raw.split())
+            operator = _MIRRORED.get(operator, operator)
+        elif before is not None and before.is_type("keyword") and before.raw_upper == "BETWEEN":
+            operator = "BETWEEN_LO"
+        elif before is not None and before.is_type("keyword") and before.raw_upper == "AND":
+            # A keyword AND is BETWEEN's; the logical one is a binary_operator.
+            operator = "BETWEEN_HI"
+        else:
+            return None
+        literal = context.segment.raw[1:-1]
+        if not date_string_comparison_changes(literal, operator):
+            return None
+        return LintResult(
+            anchor=context.segment,
+            description=f"'{literal}' is compared as a string. If the other side is a date or timestamp, Spark 3.x "
+            "casts the string to it, where 2.4 cast the date or timestamp to a string (except a timestamp under = and "
+            "<=>), so the result can change silently: ts > '2020-01-01' kept midnight rows on 2.4 and drops them on "
+            "3.x; d = '2020-1-1' matched nothing on 2.4 and matches on 3.x. "
+            "spark.sql.legacy.typeCoercion.datetimeToString.enabled=true restores 2.4 and is injected; its cost is that "
+            "a date partition column compared with a string is no longer pruned. To drop it, compare with a typed "
+            "literal (DATE '...', TIMESTAMP '...') that states the comparison you mean.",
+        )
+
+
+_NONEMPTY_CTAS_PROBED = (
+    "Probed on 2.4.8 and 3.5.5, re-running the CTAS after DROP TABLE left the files in place."
+)
+
+
+def _ctas_location(segment) -> bool:
+    """Whether a ``create_table_statement`` is a CTAS with a location: a
+    LOCATION clause, or a 'path' in OPTIONS, and an ``AS <query>``."""
+    keywords = [s.raw_upper for s in segment.segments if s.is_type("keyword")]
+    if "AS" not in keywords:
+        return False
+    if "LOCATION" in keywords:
+        return True
+    options = segment.get_child("bracketed")
+    return options is not None and "OPTIONS" in keywords and any(
+        p.raw.strip("`'\"").lower() == "path" for p in options.recursive_crawl("property_name_identifier")
+    )
+
+
+class Rule_CTASLOCATION_L014(BaseRule):
+    """Spark 3.2 rejects a data source CTAS into a non-empty location.
+
+    ``CREATE TABLE t USING <format> LOCATION '<dir>' AS SELECT ...`` fails on
+    3.x when the directory already holds files ("CREATE-TABLE-AS-SELECT cannot
+    create table with location to a non-empty directory"); 2.4 replaced
+    them. The common way to hit it is a re-run: the table was dropped (or the
+    job died after writing) and the files stayed. Probed: with
+    ``spark.sql.legacy.allowNonEmptyLocationInCTAS=true`` 3.5.5 replaces the
+    old files and the table holds what 2.4.8's does. A Hive-format CTAS is
+    HIVECTASLOCATION_L015.
+
+    **Flagged**
+
+    .. code-block:: sql
+
+        CREATE TABLE t USING parquet LOCATION '/data/t' AS SELECT * FROM s
+    """
+
+    groups = ("all",)
+    crawl_behaviour = SegmentSeekerCrawler({"create_table_statement"})
+    is_fix_compatible = False
+
+    def _eval(self, context: RuleContext) -> Optional[LintResult]:
+        if context.segment.get_child("using_clause") is None or not _ctas_location(context.segment):
+            return None
+        return LintResult(
+            anchor=context.segment,
+            description="CREATE TABLE ... USING ... LOCATION ... AS SELECT: Spark 3.2 fails when the location already "
+            "holds files (a re-run after DROP TABLE, or after a failed run); 2.4 replaced them. "
+            "spark.sql.legacy.allowNonEmptyLocationInCTAS=true restores 2.4's result and is injected. "
+            + _NONEMPTY_CTAS_PROBED,
+        )
+
+
+class Rule_HIVECTASLOCATION_L015(BaseRule):
+    """Spark 3.2 rejects a Hive-format CTAS into a non-empty location, and its
+    legacy config does not restore 2.4.
+
+    ``CREATE TABLE t [STORED AS <format>] LOCATION '<dir>' AS SELECT ...``
+    with no ``USING`` is a Hive table. 3.x fails when the directory already
+    holds files, as for L014; 2.4 replaced them. Probed on 3.5.5 with
+    ``spark.sql.legacy.allowNonEmptyLocationInCTAS=true``, with
+    ``spark.sql.hive.convertMetastoreCtas`` on and off: the CTAS succeeds but
+    KEEPS the old files, so the table holds the old rows and the new ones --
+    2.4.8 held only the new. So no config is injected for this one: empty the
+    location before the CTAS.
+
+    **Flagged**
+
+    .. code-block:: sql
+
+        CREATE TABLE t STORED AS PARQUET LOCATION '/data/t' AS SELECT * FROM s
+    """
+
+    groups = ("all",)
+    crawl_behaviour = SegmentSeekerCrawler({"create_table_statement"})
+    is_fix_compatible = False
+
+    def _eval(self, context: RuleContext) -> Optional[LintResult]:
+        if context.segment.get_child("using_clause") is not None or not _ctas_location(context.segment):
+            return None
+        return LintResult(
+            anchor=context.segment,
+            description="Hive-format CREATE TABLE ... LOCATION ... AS SELECT: Spark 3.2 fails when the location "
+            "already holds files (a re-run after DROP TABLE, or after a failed run); 2.4 replaced them. "
+            "spark.sql.legacy.allowNonEmptyLocationInCTAS=true does NOT restore 2.4 here: the old files are kept "
+            "and the table returns the old rows plus the new. Delete the location's files before the CTAS. "
+            + _NONEMPTY_CTAS_PROBED,
+        )
+
+
+class Rule_RECURSIVEVIEW_L016(BaseRule):
+    """Spark 3.1 rejects a temporary view defined in terms of itself.
+
+    ``CREATE OR REPLACE TEMP VIEW v AS SELECT ... FROM v`` -- redefining a
+    temp view on top of its previous definition -- worked in 2.4, which
+    stored the view's analyzed plan, so ``v`` in the body meant the old view.
+    3.1+ stores the view's text and fails with ``[RECURSIVE_VIEW] Recursive
+    view `v` detected``. Probed on 2.4.8 and 3.5.5, TEMP, TEMPORARY and
+    GLOBAL TEMPORARY alike: ``spark.sql.legacy.storeAnalyzedPlanForView=true``
+    gives 2.4.8's rows. ``df.createOrReplaceTempView`` is not affected.
+
+    **Flagged**
+
+    .. code-block:: sql
+
+        CREATE OR REPLACE TEMP VIEW v AS SELECT a + 1 AS a FROM v
+    """
+
+    groups = ("all",)
+    crawl_behaviour = SegmentSeekerCrawler({"create_view_statement"})
+    is_fix_compatible = False
+
+    @staticmethod
+    def _name(reference) -> str:
+        return ".".join(p.raw.strip("`").lower() for p in reference.segments if p.is_type("naked_identifier", "quoted_identifier"))
+
+    def _eval(self, context: RuleContext) -> Optional[LintResult]:
+        keywords = [s.raw_upper for s in context.segment.segments if s.is_type("keyword")]
+        view = context.segment.get_child("table_reference")
+        if view is None or not ({"TEMP", "TEMPORARY"} & set(keywords)):
+            return None
+        # A temp view is referred to by its bare name; a global one through global_temp.
+        name = ("global_temp." if "GLOBAL" in keywords else "") + self._name(view)
+        for ref in context.segment.recursive_crawl("table_reference"):
+            if ref is not view and self._name(ref) == name:
+                return LintResult(
+                    anchor=context.segment,
+                    description=f"Temporary view {name} is defined in terms of itself. 2.4 read the name in the body as "
+                    "the view's previous definition; Spark 3.1+ fails with RECURSIVE_VIEW. "
+                    "spark.sql.legacy.storeAnalyzedPlanForView=true restores 2.4's behaviour and is injected; "
+                    "giving the new view its own name avoids it in code.",
+                )
+        return None

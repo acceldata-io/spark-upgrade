@@ -50,5 +50,7 @@ fix.JsonEmptyStringDetect
 fix.CsvBinaryTypeDetect
 fix.ProcedureSyntaxDetect
 fix.StoreAssignmentPolicyDetect
+fix.DateTimeStringComparisonDetect
+fix.SaveAsTablePathDetect
 fix.OneHotEncoderEstimatorRename
 fix.CompileBreakDetect

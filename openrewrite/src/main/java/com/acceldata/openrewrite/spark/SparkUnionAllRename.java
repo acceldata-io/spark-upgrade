@@ -35,7 +35,7 @@ public class SparkUnionAllRename extends Recipe {
 
     @Override
     public String getDescription() {
-        return "unionAll is deprecated; union is the exact, semantics-preserving equivalent.";
+        return "unionAll is an alias of union (not deprecated in 2.4 or 3.5.5); union is the name the docs use, with identical semantics.";
     }
 
     @Override

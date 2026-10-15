@@ -245,3 +245,38 @@ _STORE_ASSIGNMENT = (
     "be safely cast to its column's type -- string to int or date, boolean to numeric -- fails the write at analysis, and "
     "a numeric overflow fails at run time; 2.4 cast it (a bad string became null, an overflow wrapped). Cast each value "
     "to its column's type, or set spark.sql.storeAssignmentPolicy=LEGACY (not allowed for an Iceberg or Delta table).")
+
+
+class SaveAsTablePathDetect(Detector):
+    """Port of the Scala rule of the same id: `saveAsTable` with a 'path'
+    option -- the DataFrame form of `CREATE TABLE ... LOCATION ... AS SELECT`
+    -- in the default mode (errorifexists). Spark 3.2 fails it when the path already holds files,
+    which is what a re-run finds after the table was dropped or a run failed;
+    2.4 replaced them. Probed on 2.4.8 and 3.5.5, re-running after DROP TABLE:
+    the default mode fails, overwrite, append and ignore do not, and with
+    spark.sql.legacy.allowNonEmptyLocationInCTAS=true the table holds 2.4.8's
+    rows. A mode that is not a literal is reported at low confidence."""
+
+    rule_id = "SaveAsTablePathDetect"
+
+    def visit_Call(self, node: cst.Call) -> None:
+        if _cst.method_name(node) != "saveAsTable" or "path" not in _cst.options_set(node, self.ctx.bindings):
+            return
+        mode_node = _cst.argument(node, 2, "mode")
+        if mode_node is None:
+            calls = _cst.spine_calls(_cst.receiver(node), "mode")
+            mode_node = _cst.argument(calls[0], 0, "saveMode") if calls else None
+        if mode_node is None or (isinstance(mode_node, cst.Name) and mode_node.value == "None"):
+            confidence = "high"
+        else:
+            mode = self.string(mode_node)
+            if mode is None:
+                confidence = "low"
+            elif mode.lower() in ("error", "errorifexists", "default"):
+                confidence = "high"
+            else:
+                return
+        self.report(node, "saveAsTable with a 'path' option in the default mode (errorifexists) creates the table at "
+                          "that path, as CREATE TABLE ... LOCATION ... AS SELECT does. From Spark 3.2 it fails when the path "
+                          "already holds files -- a re-run after the table was dropped or a run failed; 2.4 replaced them. "
+                          "spark.sql.legacy.allowNonEmptyLocationInCTAS=true restores 2.4 and is injected.", confidence)

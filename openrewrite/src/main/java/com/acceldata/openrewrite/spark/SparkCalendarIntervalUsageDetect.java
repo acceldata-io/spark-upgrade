@@ -11,12 +11,11 @@ import org.openrewrite.marker.SearchResult;
 
 /**
  * Java-side counterpart to the Scalafix {@code CalendarIntervalUsageDetect}
- * rule: date/timestamp subtraction returns {@code DayTimeIntervalType} from
- * Spark 3.2 onward, where 2.4 returned a type expressed via {@code
- * org.apache.spark.unsafe.types.CalendarInterval}. Same narrowing the Scala
- * rule uses: detecting the subtraction itself needs both operand types
- * resolved (declined project-wide, no reliable call-site type inference);
- * the code that actually breaks is code naming {@code CalendarInterval},
+ * rule: Spark 3.0 changed {@code org.apache.spark.unsafe.types.CalendarInterval}
+ * (a {@code days} field added; the two-argument constructor, the
+ * {@code MICROS_PER_*} constants, the {@code from*String} parsers,
+ * {@code milliseconds()}, {@code add}, {@code subtract} and {@code negate}
+ * removed), so the code that breaks is code naming {@code CalendarInterval},
  * which is exactly detectable. Verified present in the real {@code
  * spark-unsafe_2.11-2.4.8.jar}.
  *
@@ -39,8 +38,8 @@ public class SparkCalendarIntervalUsageDetect extends Recipe {
 
     @Override
     public String getDescription() {
-        return "References to CalendarInterval -- from Spark 3.2 date/timestamp subtraction yields " +
-                "DayTimeIntervalType instead, so code typed against CalendarInterval breaks.";
+        return "References to CalendarInterval -- Spark 3.0 added a days field and removed the two-argument " +
+                "constructor, the MICROS_PER_* constants, the from*String parsers, milliseconds(), add, subtract and negate.";
     }
 
     @Override
@@ -65,9 +64,10 @@ public class SparkCalendarIntervalUsageDetect extends Recipe {
                         !namesRewrittenConstructor()) {
                     return SearchResult.found(
                             id,
-                            "CalendarInterval is referenced here. From Spark 3.2, subtracting two dates or two " +
-                                    "timestamps produces DayTimeIntervalType, not CalendarIntervalType -- so code " +
-                                    "that stores, casts or checks the result as CalendarInterval no longer type-checks."
+                            "CalendarInterval is referenced here. Spark 3.0 added a days field and removed the " +
+                                    "(months, microseconds) constructor, the MICROS_PER_* constants, the from*String " +
+                                    "parsers, milliseconds(), add, subtract and negate: code calling those no longer " +
+                                    "compiles, and code reading microseconds silently gets different numbers."
                     );
                 }
                 return id;
