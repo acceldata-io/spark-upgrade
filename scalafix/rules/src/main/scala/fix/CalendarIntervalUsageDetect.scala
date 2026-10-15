@@ -6,9 +6,11 @@ import scalafix.v1._
 import scala.meta._
 
 /**
- * Family D (SQL migration guide, 3.1 -> 3.2): date and timestamp subtraction
- * returns `DayTimeIntervalType` from 3.2 onward, where 2.4 returned
- * `CalendarIntervalType`.
+ * Spark 3.0 changed `org.apache.spark.unsafe.types.CalendarInterval` (javap on the 2.4.8 and 3.5.5
+ * jars): a `days` field was added, and the `(months, microseconds)` constructor, the
+ * `MICROS_PER_*` constants, the `from*String` parsers, `milliseconds()`, `add`, `subtract` and
+ * `negate` were removed. (3.2's `DayTimeIntervalType` for date subtraction does not reach a 2.4
+ * app: 2.4.8 rejects `date - date`, probed.)
  *
  * The obvious detector -- "find a subtraction between two date/timestamp
  * columns" -- needs both operand types resolved, which is the class of rule this
@@ -82,13 +84,12 @@ class CalendarIntervalUsageDetect extends SemanticRule("CalendarIntervalUsageDet
     RuleFinding.report(
       RuleChange(
         manualId,
-        "CalendarInterval is referenced here. From Spark 3.0 an interval has separate months, days and microseconds " +
-          "fields (`interval 1 day 2 hours` is days=1, microseconds=7200000000 where 2.4 had microseconds=93600000000), " +
-          "and from 3.2 subtracting two dates or two timestamps produces DayTimeIntervalType, not CalendarIntervalType -- " +
-          "so code that stores, pattern-matches, casts or reads the fields of such a result no longer type-checks or " +
-          "silently reads different numbers.",
-        "No auto-rewrite; migrate to the ANSI interval types (DayTimeIntervalType / YearMonthIntervalType), or account " +
-          "for the days field when reading a CalendarInterval.",
+        "CalendarInterval is referenced here. Spark 3.0 changed the class: it added a days field (`interval 1 day 2 hours` " +
+          "is days=1, microseconds=7200000000, where 2.4 had microseconds=93600000000) and removed the (months, microseconds) " +
+          "constructor, the MICROS_PER_* constants, the from*String parsers, milliseconds(), add, subtract and negate. Code " +
+          "that calls those no longer compiles; code that reads microseconds silently gets different numbers.",
+        "No exact rewrite beyond the constructor. Read days alongside microseconds; use java.util.concurrent.TimeUnit for " +
+          "the constants; parse an interval in SQL (expr(\"interval ...\")) instead of fromString.",
         t
       )
     )

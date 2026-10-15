@@ -36,7 +36,7 @@ class UnionRewrite(config: UnionRewriteConfig) extends SemanticRule("UnionRewrit
 
   override def fix(implicit doc: SemanticDocument): Patch = {
     val ruleId = "UnionRewrite"
-    val explanation = "unionAll is deprecated; use union instead (identical semantics)."
+    val explanation = "unionAll is an alias of union (not deprecated in 2.4 or 3.5.5); renamed to union, the name the docs use. Identical semantics."
 
     def renamed(nameTree: Tree, replacement: String): Patch =
       RuleFinding.report(

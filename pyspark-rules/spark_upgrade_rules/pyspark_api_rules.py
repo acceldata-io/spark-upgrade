@@ -8,7 +8,11 @@ SS2.7), then the class attributes and parameter lists that diff skipped
 (spark-migrate-cli docs/triage-2026-10-13/api-pyspark.md). Three are covered
 elsewhere: `pyspark.streaming.kafka` and `pyspark.streaming.flume` are hard
 blockers on the JVM side, and the `Has*` mixins' setters are
-`MlSharedParamSetters` below.
+`MlSharedParamSetters` below. Not covered, so the list is not complete: a name
+imported through a module that re-exported it in 2.4 and no longer does, a
+name dropped only from `__all__` (a star import misses it), and the setters
+3.x removed from `OneVsRestModel`, `CrossValidatorModel` and
+`TrainValidationSplitModel`.
 
 The rewrites:
 
@@ -416,9 +420,18 @@ class RemovedPySparkApi(Fixer):
             self.report(node, "OneHotEncoder(...).transform(...): in 2.4 OneHotEncoder was a Transformer; since Spark 3.0 "
                               "it is an Estimator (2.4's OneHotEncoderEstimator) and has no transform -- AttributeError. "
                               "Fit it first: encoder.fit(df).transform(df). In a Pipeline it needs no change.", "high", tier=3)
-        elif name == "context" and isinstance(recv, cst.Call) and _cst.method_name(recv) in ("write", "read"):
-            self.report(node, f".{_cst.method_name(recv)}().context(sqlContext) was removed from ML readers and writers "
+        elif name == "context" and (rw := self._reader_or_writer(recv)):
+            self.report(node, f".{rw}().context(sqlContext) was removed from ML readers and writers "
                               "in Spark 3.0 -- use .session(spark).", "high", tier=3)
+
+    def _reader_or_writer(self, recv) -> str | None:
+        """"write" or "read" when `recv` is `x.write()`/`x.read()`, or a name
+        bound once to one (`w = model.write()`)."""
+        if isinstance(recv, cst.Name) and self.ctx.bindings.count.get(recv.value) == 1:
+            recv = self.ctx.bindings.value.get(recv.value)
+        if isinstance(recv, cst.Call) and _cst.method_name(recv) in ("write", "read"):
+            return _cst.method_name(recv)
+        return None
 
     def leave_Call(self, original_node: cst.Call, updated_node: cst.Call) -> cst.BaseExpression:
         name = _cst.method_name(original_node)

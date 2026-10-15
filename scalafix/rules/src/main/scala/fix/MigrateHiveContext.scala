@@ -5,8 +5,8 @@ import scalafix.v1._
 import scala.meta._
 
 /**
- * Family C (core migration guide, 2.4 -> 3.0): `HiveContext` was removed;
- * `SparkSession.builder().enableHiveSupport()` is the 3.x entry point and has
+ * Family C: `HiveContext` has been deprecated since Spark 2.0 and still compiles on 3.5.5 (with a
+ * deprecation warning; `javap` on both jars); `SparkSession.builder().enableHiveSupport()` is the entry point and has
  * existed unchanged since Spark 2.0 -- verified via `javap` against the real
  * 2.4.8 AND 3.5.5 jars that `enableHiveSupport()`, `getOrCreate()`, and the
  * `.sqlContext` accessor all exist identically in both. The construction and
@@ -49,8 +49,8 @@ import scala.meta._
  */
 class MigrateHiveContext extends SemanticRule("MigrateHiveContext") {
 
-  private val explanation = "HiveContext is removed; SparkSession.builder().enableHiveSupport() is the Spark 3.x entry point."
-  private val typeRefExplanation = "HiveContext is removed; a HiveContext-typed reference should be retyped to SQLContext (review any Hive-specific method calls on it first)."
+  private val explanation = "HiveContext has been deprecated since Spark 2.0 (it still compiles on 3.5.5, with a warning); SparkSession.builder().enableHiveSupport() is the entry point."
+  private val typeRefExplanation = "HiveContext has been deprecated since Spark 2.0; a HiveContext-typed reference is retyped to SQLContext (review any Hive-specific method calls on it first)."
 
   override def fix(implicit doc: SemanticDocument): Patch = {
     val hiveSymbolMatcher = SymbolMatcher.normalized("org.apache.spark.sql.hive.HiveContext")

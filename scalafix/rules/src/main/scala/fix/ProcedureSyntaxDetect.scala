@@ -8,8 +8,9 @@ import scala.meta.tokens.Token
 
 /**
  * Not a Spark API change -- a Scala 2.11 -> 2.12 SOURCE break (code review
- * 2026-08-22 §8.2). Procedure syntax (`def f() { ... }`, no `=`) is
- * deprecated starting 2.12 and REMOVED entirely in 2.13.
+ * 2026-08-22 §8.2). Procedure syntax (`def f() { ... }`, no `=`) compiles on 2.12 without a
+ * warning, even with -deprecation (probed); 2.13 deprecates it and Scala 3 drops it. The rewrite
+ * is the explicit form, which compiles on every version.
  * `VersionRegistry`/`DepUpgrade.ScalaVersionOutdated` bump `scalaVersion` to
  * 2.12 (Tier 1, auto-applied) but nothing in this tool detects or fixes the
  * source-level fallout of that bump -- this is the first rule to close that
@@ -35,13 +36,13 @@ import scala.meta.tokens.Token
  */
 class ProcedureSyntaxDetect extends SyntacticRule("ProcedureSyntaxDetect") {
   override val description =
-    "Procedure syntax (def f() { ... }, no `=`) is deprecated in Scala 2.12 and removed in 2.13; rewrites to def f(): Unit = { ... }."
+    "Procedure syntax (def f() { ... }, no `=`) still compiles on Scala 2.12 but is deprecated in 2.13 and dropped in Scala 3; rewrites to def f(): Unit = { ... }."
   override val isRewrite = true
 
   private val explanation =
-    "Procedure syntax (a method body immediately following the parameter list, with no `=`) is deprecated " +
-      "starting Scala 2.12 and removed entirely in 2.13. The compiler infers Unit here, but that inference " +
-      "goes away with the syntax."
+    "Procedure syntax (a method body immediately following the parameter list, with no `=`) still compiles " +
+      "on Scala 2.12, but is deprecated in 2.13 and dropped in Scala 3. The explicit `: Unit =` form means the " +
+      "same and compiles everywhere."
 
   private def isProcedureSyntax(d: Defn.Def): Boolean = {
     val boundary = d.paramss.flatten.lastOption.map(_.pos.end).getOrElse(d.name.pos.end)

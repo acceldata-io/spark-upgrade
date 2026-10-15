@@ -114,6 +114,36 @@ class TimeZoneTest(unittest.TestCase):
         self.assertEqual(lines(code, self.rule), [2, 3, 4])
 
 
+class DateTimeStringComparisonTest(unittest.TestCase):
+    rule = "DateTimeStringComparisonDetect"
+
+    def test_pairs_that_change_on_a_column(self):
+        code = """
+            a = df.filter(F.col("ts") > "2020-01-01")
+            b = df.where(df.d == "2020-1-1")
+            c = F.col("d") <= F.lit("2020-01-01 10:00:00")
+            d = df.filter("2020-01-01" >= df["ts"])
+            e = F.to_date("s").between("2020-01-01", "2020-01-31")
+            f = df.d.eqNullSafe("2020-01-01T10:00")
+            g = F.when(df.ts <= "2020-01-31", 1)
+            CUTOFF = "2020-1-1"
+            h = F.col("d") < CUTOFF
+        """
+        self.assertEqual(lines(code, self.rule), [2, 3, 4, 5, 6, 7, 8, 10])
+
+    def test_pairs_that_do_not_change_and_python_strings(self):
+        code = """
+            ok1 = df.filter(F.col("dt") == "2020-01-01")
+            ok2 = df.filter((F.col("ts") >= "2020-01-01") & (F.col("ts") < "2020-02-01"))
+            ok3 = F.col("d").isin("2020-1-1")
+            ok4 = run_date > "2020-01-01"
+            ok5 = rdd.filter(lambda r: r.ts > "2020-01-01")
+            ok6 = df.filter(F.col("month") > "2020-01")
+            ok7 = pdf["d"].between("2020-01-01", "2020-01-31")
+        """
+        self.assertEqual(lines(code, self.rule), [])
+
+
 class FunctionRulesTest(unittest.TestCase):
     def test_add_months(self):
         code = """
@@ -288,6 +318,20 @@ class DataSourceRulesTest(unittest.TestCase):
         found = run(code, "StoreAssignmentPolicyDetect")
         self.assertEqual([(f["line"] - 2, f["confidence"]) for f in found],
                          [(2, "medium"), (3, "medium"), (4, "medium"), (5, "medium"), (6, "low")])
+
+    def test_save_as_table_path_in_the_default_mode(self):
+        code = """
+            df.write.option("path", p).saveAsTable("t")
+            df.write.format("parquet").options(path=p).mode("errorifexists").saveAsTable("t")
+            df.write.saveAsTable("t", path=p)
+            df.write.option("path", p).mode(write_mode).saveAsTable("t")
+            ok1 = df.write.option("path", p).mode("overwrite").saveAsTable("t")
+            ok2 = df.write.saveAsTable("t", "parquet", "append", path=p)
+            ok3 = df.write.saveAsTable("t")
+        """
+        found = run(code, "SaveAsTablePathDetect")
+        self.assertEqual([(f["line"] - 2, f["confidence"]) for f in found],
+                         [(2, "high"), (3, "high"), (4, "high"), (5, "low")])
 
     def test_csv_binary_schema_one_hop(self):
         code = """

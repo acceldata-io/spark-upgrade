@@ -139,6 +139,15 @@ class RemovedApiTest(unittest.TestCase):
         """
         self.assertEqual([x[:2] for x in analyze(code, self.rule)], [(3, 3), (5, 3), (6, 3), (7, 3)])
 
+    def test_context_through_a_bound_writer(self):
+        code = """
+            w = model.write()
+            w.context(sqlContext).save(p)
+            r = MyReader()
+            r.context(sqlContext)
+        """
+        self.assertEqual([x[:2] for x in analyze(code, self.rule)], [(3, 3)])
+
     def test_moved_names_are_reported_with_their_new_import(self):
         # Checked against 3.5.5: both live on, in pyspark.ml.wrapper and
         # pyspark.errors.exceptions.captured; neither at its 2.4 path.

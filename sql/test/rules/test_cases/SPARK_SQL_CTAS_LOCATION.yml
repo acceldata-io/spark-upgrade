@@ -1,0 +1,36 @@
+rule: CTASLOCATION_L014
+
+datasource_ctas_location_flagged:
+  configs:
+    core:
+      dialect: sparksql
+  fail_str: |
+    CREATE TABLE t USING parquet LOCATION '/data/t' AS SELECT * FROM s
+
+datasource_ctas_options_path_flagged:
+  configs:
+    core:
+      dialect: sparksql
+  fail_str: |
+    CREATE TABLE IF NOT EXISTS t USING orc OPTIONS (path '/data/t') PARTITIONED BY (d) AS SELECT * FROM s
+
+datasource_ctas_without_location_ok:
+  configs:
+    core:
+      dialect: sparksql
+  pass_str: |
+    CREATE TABLE t USING parquet AS SELECT * FROM s
+
+datasource_table_with_location_no_query_ok:
+  configs:
+    core:
+      dialect: sparksql
+  pass_str: |
+    CREATE TABLE t (id INT) USING parquet LOCATION '/data/t'
+
+hive_ctas_is_l015_not_this_ok:
+  configs:
+    core:
+      dialect: sparksql
+  pass_str: |
+    CREATE TABLE t STORED AS PARQUET LOCATION '/data/t' AS SELECT * FROM s

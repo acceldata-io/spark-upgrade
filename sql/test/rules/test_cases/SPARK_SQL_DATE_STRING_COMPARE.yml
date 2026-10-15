@@ -1,0 +1,64 @@
+rule: DATESTRCOMPARE_L013
+
+timestamp_greater_than_date_flagged:
+  configs:
+    core:
+      dialect: sparksql
+  fail_str: |
+    SELECT * FROM t WHERE ts > '2020-01-01'
+
+literal_on_the_left_mirrored_flagged:
+  configs:
+    core:
+      dialect: sparksql
+  fail_str: |
+    SELECT * FROM t WHERE '2020-01-01' >= ts
+
+unpadded_date_equality_flagged:
+  configs:
+    core:
+      dialect: sparksql
+  fail_str: |
+    SELECT * FROM t WHERE d = "2020-1-1"
+
+time_part_null_safe_flagged:
+  configs:
+    core:
+      dialect: sparksql
+  fail_str: |
+    SELECT CASE WHEN d <=> '2020-01-01 10:00:00' THEN 1 END FROM t
+
+between_upper_bound_flagged:
+  configs:
+    core:
+      dialect: sparksql
+  fail_str: |
+    SELECT * FROM t WHERE ts BETWEEN '2020-01-01' AND '2020-01-31' AND x = 1
+
+join_condition_flagged:
+  configs:
+    core:
+      dialect: sparksql
+  fail_str: |
+    SELECT * FROM a JOIN b ON a.id = b.id AND b.ts <= '2020-01-31'
+
+padded_date_equality_and_half_open_range_ok:
+  configs:
+    core:
+      dialect: sparksql
+  pass_str: |
+    SELECT * FROM t WHERE dt = '2020-01-01' AND ts >= '2020-01-01' AND ts < '2020-02-01' AND d <> '2020-01-02'
+
+in_list_and_typed_literals_ok:
+  configs:
+    core:
+      dialect: sparksql
+  pass_str: |
+    SELECT * FROM t WHERE d IN ('2020-1-1') AND ts > TIMESTAMP '2020-01-01 00:00:00' AND d = to_date('2020-1-1')
+
+partition_spec_and_non_dates_ok:
+  configs:
+    core:
+      dialect: sparksql
+  pass_str: |
+    INSERT INTO t PARTITION (dt='2020-1-1') SELECT * FROM s WHERE month = '2020-01' AND code > '2020-01-01x'

@@ -12,7 +12,7 @@ object SparkSQLCallExternal {
 
   /** Probed once per JVM, not once per SQL literal.
    *
-   * The whole Family K rule set (13 rules) lives in the external `sqlfluff`
+   * The whole Family K rule set (17 rules) lives in the external `sqlfluff`
    * plugin, so if the binary isn't on PATH this rule contributes ZERO findings
    * -- and, before this, said nothing about it: `Try(...).toOption` swallowed
    * the process-launch failure, `stillFlagged` came back empty, and
@@ -31,7 +31,8 @@ object SparkSQLCallExternal {
     "SPARKSQLCAST_L001", "RESERVEDROPERTIES_L002", "NOCHARS_L003", "FORMATSTRONEINDEX_L004",
     "SPARKSQL_L004", "SPARKSQL_L005", "GLOBALTEMPVIEW_L006", "HISTOGRAMNUMERIC_L007",
     "BYTEPADDING_L008", "BINARYCONV_L009", "CTEPRECEDENCE_L010", "TYPEDPARTITION_L011",
-    "TRANSFORMDELIM_L012"
+    "TRANSFORMDELIM_L012", "DATESTRCOMPARE_L013", "CTASLOCATION_L014", "HIVECTASLOCATION_L015",
+    "RECURSIVEVIEW_L016"
   )
 
   val ruleCodes: String = pluginRuleCodes.toSeq.sorted.mkString(",")
@@ -63,7 +64,7 @@ object SparkSQLCallExternal {
    *      reported a Family K-heavy fixture as having zero SQL findings, and
    *      `analyze` said SUCCESS.
    *   2. **`sqlfluff` runs but the plugin is missing or stale.** PyPI's
-   *      published plugin ships only 6 of these 13 codes (same SS0.4 note);
+   *      published plugin ships only 6 of these codes (same SS0.4 note);
    *      an unregistered code is a `WARNING Tried to allowlist unknown rule
    *      references: [...]` line, not an error, so the run finishes clean.
    *
@@ -94,7 +95,7 @@ object SparkSQLCallExternal {
           "commonly a click/sqlfluff version incompatibility; run the command by hand to see the traceback)")
       case Some(text) if text.contains("Tried to allowlist unknown rule references") =>
         Some("sqlfluff is on PATH but the sparksql-upgrade plugin is missing or stale -- it does not " +
-          "register all 13 Family K rule codes")
+          "register all 17 Family K rule codes")
       case Some(_) => None
     }
   }

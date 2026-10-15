@@ -1,0 +1,43 @@
+rule: RECURSIVEVIEW_L016
+
+temp_view_over_itself_flagged:
+  configs:
+    core:
+      dialect: sparksql
+  fail_str: |
+    CREATE OR REPLACE TEMP VIEW v AS SELECT a + 1 AS a FROM v
+
+temporary_view_join_flagged:
+  configs:
+    core:
+      dialect: sparksql
+  fail_str: |
+    CREATE OR REPLACE TEMPORARY VIEW Events AS SELECT e.* FROM `events` e JOIN fresh f ON e.id = f.id
+
+global_temp_view_over_itself_flagged:
+  configs:
+    core:
+      dialect: sparksql
+  fail_str: |
+    CREATE OR REPLACE GLOBAL TEMPORARY VIEW v AS SELECT * FROM global_temp.v WHERE a > 1
+
+temp_view_over_other_table_ok:
+  configs:
+    core:
+      dialect: sparksql
+  pass_str: |
+    CREATE OR REPLACE TEMP VIEW v AS SELECT * FROM v_raw
+
+temp_view_over_qualified_table_ok:
+  configs:
+    core:
+      dialect: sparksql
+  pass_str: |
+    CREATE OR REPLACE TEMP VIEW v AS SELECT * FROM db.v
+
+persistent_view_ok:
+  configs:
+    core:
+      dialect: sparksql
+  pass_str: |
+    CREATE OR REPLACE VIEW v AS SELECT * FROM v
