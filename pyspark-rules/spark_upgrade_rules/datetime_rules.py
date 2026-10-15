@@ -16,7 +16,7 @@ import libcst as cst
 from libcst.helpers import get_full_name_for_node
 
 from spark_upgrade_rules import _cst
-from spark_upgrade_rules.detector import Detector, Fixer
+from spark_upgrade_rules.detector import Detector, Fixer, NameDiscarded
 
 # ---- datetime patterns --------------------------------------------------------
 
@@ -189,7 +189,7 @@ _SNAP = ("Spark 3.0 no longer snaps the result to the last day of the month when
 _SNAP_HELPERS = ("last_day", "to_date", "when")
 
 
-class AddMonthsSnapDetect(Fixer):
+class AddMonthsSnapDetect(NameDiscarded, Fixer):
     """`add_months(d, n)`: 2.4 returned the last day of the target month when
     `d` was the last day of its month; 3.0 does not. Rewritten to
     `when(to_date(d) == last_day(d), last_day(add_months(d, n))).otherwise(add_months(d, n))`
@@ -227,39 +227,13 @@ class AddMonthsSnapDetect(Fixer):
                            (h not in bound and (ctx.star_functions or self.import_index is not None)) for h in _SNAP_HELPERS)
         self.to_import = [] if ctx.star_functions else [h for h in _SNAP_HELPERS if h not in bound]
         self.bare_rewritten = False
-        # Expressions whose auto-generated column name is discarded, and how
-        # deep inside one the visit is: the rewrite changes that name
-        # (add_months(d, 1) becomes CASE WHEN ...), so it is made only there.
-        self.unnamed: set[int] = set()
-        self.unnamed_depth = 0
-
-    def on_visit(self, node: cst.CSTNode) -> bool:
-        if id(node) in self.unnamed:
-            self.unnamed_depth += 1
-        return super().on_visit(node)
-
-    def on_leave(self, original_node: cst.CSTNode, updated_node: cst.CSTNode):
-        result = super().on_leave(original_node, updated_node)
-        if id(original_node) in self.unnamed:
-            self.unnamed_depth -= 1
-        return result
 
     def visit_Call(self, node: cst.Call) -> None:
         if any(_ADD_MONTHS_SQL.search(sql) for sql in self.sql_text_args(node)):
             self._manual(node, "add_months(...) in SQL text")
-        # Parents are visited before their arguments, so a scope is marked
-        # before anything inside it is reached.
-        name = _cst.method_name(node)
-        if name in ("alias", "name"):
-            self.unnamed.add(id(_cst.receiver(node)))
-        elif name == "withColumn":
-            self.unnamed.add(id(_cst.argument(node, 1, "col")))
-        elif name in ("filter", "where"):
-            self.unnamed.add(id(_cst.argument(node, 0, "condition")))
-        elif name in ("orderBy", "sort", "sortWithinPartitions"):
-            self.unnamed.update(id(a) for a in _cst.positional(node))
-        elif name == "join":
-            self.unnamed.add(id(_cst.argument(node, 1, "on")))
+        # The rewrite changes the generated name (add_months(d, 1) becomes
+        # CASE WHEN ...), so it is made only where that name is discarded.
+        self.mark_unnamed(node)
 
     def leave_Call(self, original_node: cst.Call, updated_node: cst.Call) -> cst.BaseExpression:
         if not self.function(original_node, "add_months"):

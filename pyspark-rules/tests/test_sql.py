@@ -82,7 +82,7 @@ class ExtractSqlTest(unittest.TestCase):
                 spark.sql(p)
             '''
         )
-        self.assertEqual([f["kind"] for f in found], ["dynamic"] * 3)
+        self.assertEqual([f["kind"] for f in found], ["dynamic"] * 3 + ["sink"], "f runs its parameter: a sink")
 
     def test_sql_is_found_where_it_is_defined(self):
         found = sql_in(
@@ -112,6 +112,86 @@ class ExtractSqlTest(unittest.TestCase):
             (9, "SELECT * FROM t WHERE d = '__param__' AND n = __param__"),
             (15, "select a from __param__ where d = '__param__'"),
         ], "USED is linted at its call site, once; prose, logging and exception text are not SQL")
+
+    def test_a_definition_says_whether_it_reaches_spark_here(self):
+        found = sql_in(
+            '''
+            from jobs import queries
+            from .registry import DAILY as D
+            import jobs.more as more
+            USED = "SELECT a FROM t"
+            TEMPLATE = "SELECT b FROM {table}"
+            UNUSED = "SELECT c FROM t"
+            REGISTRY = {"q": "SELECT d FROM t"}
+            def run(spark, name):
+                spark.sql(USED.upper())
+                spark.sql(TEMPLATE.format(table=name))
+                spark.sql(f"SELECT e FROM {name}")
+                spark.sql(REGISTRY[name])
+                spark.sql(D)
+                spark.sql(queries.WEEKLY % name)
+                spark.sql(more.X)
+            '''
+        )
+        defined = {f["text"]: (f["name"], f["reaches"]) for f in found if f["kind"] == "defined"}
+        self.assertEqual(defined, {
+            "SELECT a FROM t": ("USED", False),  # USED.upper() is not a template of USED
+            "SELECT b FROM __param__": ("TEMPLATE", True),
+            "SELECT c FROM t": ("UNUSED", False),
+            "SELECT d FROM t": ("", True),  # REGISTRY[name] runs one of its entries
+            "SELECT e FROM __param__": ("", True),
+        })
+        refs = [f.get("ref") for f in found if f["kind"] not in ("defined", "sink", "pass")]
+        self.assertEqual(refs, [None, None, None, None, ".registry.DAILY", "jobs.queries.WEEKLY", "jobs.more.X"])
+
+    def test_a_helper_that_runs_its_parameter_is_a_sink_and_calls_into_it_are_passes(self):
+        found = sql_in(
+            '''
+            from billing.util import sql_runner
+            from billing.sql.invoicing import QUERIES
+            STEPS = ["SELECT a FROM t"]
+            def run(spark, sql, label=None):
+                return spark.sql(sql)
+            def run_template(spark, template, **params):
+                return spark.sql(template.format(**params))
+            def job(spark, name):
+                sql_runner.run(spark, QUERIES[name], label=name)
+                run(spark, STEPS[0])
+                run_template(spark, template=STEPS[0])
+            '''
+        )
+        sinks = [(f["name"], f["index"], f["keyword"]) for f in found if f["kind"] == "sink"]
+        self.assertEqual(sinks, [("run", 1, "sql"), ("run_template", 1, "template")])
+        passes = [(f["callee"], f["index"], f["keyword"], f.get("name"), f.get("ref")) for f in found if f["kind"] == "pass"]
+        self.assertIn(("billing.util.sql_runner.run", 1, "", None, "billing.sql.invoicing.QUERIES"), passes)
+        self.assertIn(("run", 1, "", "STEPS", None), passes)
+        self.assertIn(("run_template", -1, "template", "STEPS", None), passes)
+        steps = [f for f in found if f["kind"] == "defined"]
+        self.assertEqual([(f["container"], f["reaches"]) for f in steps], [("STEPS", False)])
+
+    def test_a_call_site_whose_sql_is_linted_where_it_is_defined_is_read(self):
+        found = sql_in(
+            '''
+            from jobs.queries import DAILY
+            TEMPLATE = "SELECT b FROM {table}"
+            REGISTRY = {"q": "SELECT d FROM t"}
+            def run(spark, name, query):
+                spark.sql(f"SELECT e FROM {name}")
+                spark.sql(TEMPLATE.format(table=name))
+                spark.sql(REGISTRY[name])
+                spark.sql(DAILY)
+                spark.sql(query)
+            '''
+        )
+        sites = [(f["kind"], f.get("read", False), f.get("ref")) for f in found if f["kind"] in ("interpolated", "dynamic")]
+        self.assertEqual(sites, [
+            ("interpolated", True, None),
+            ("dynamic", True, None),  # a name's .format: dynamic, but its template was read
+            ("dynamic", True, None),
+            ("dynamic", False, "jobs.queries.DAILY"),  # the CLI resolves the import
+            ("dynamic", False, None),  # a parameter: SQL built at run time
+        ])
+        self.assertTrue(all("_ids" not in f and "_name" not in f for f in found))
 
     def test_not_a_sql_call(self):
         self.assertEqual(sql_in("spark.read.sql_table('x')\nsql('SELECT 1')\nspark.sql()\n"), [])

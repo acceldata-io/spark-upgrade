@@ -31,6 +31,13 @@ import scala.meta._
  * with one of those would have this firing constantly on ordinary field
  * extraction. Fixed to additionally require the resolved symbol to be
  * `Dataset.as`.
+ *
+ * `.as[String]` is NOT exempted, though the 2026-10-15 review listed it as
+ * noise: probed on 2.4.8 and 3.5.5, it gives the same values for every atomic
+ * column (int, long, double, decimal, boolean, date, timestamp, binary,
+ * string, null), but an array, struct or map column `.as[String]` worked on
+ * 2.4.8 (`[1, 2]`, `[1, q]`) and fails on 3.5.5 (CANNOT_UP_CAST_DATATYPE),
+ * and the call site does not show the column's type.
  */
 class LooseUpcastDetect extends SemanticRule("LooseUpcastDetect") {
   override val description =

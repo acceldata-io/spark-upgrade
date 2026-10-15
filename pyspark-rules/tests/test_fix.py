@@ -380,6 +380,45 @@ class AddMonthsSnapTest(unittest.TestCase):
         self.assertIn('F.add_months(F.when(', out, "the inner call is rewritten, the outer reported")
 
 
+class SplitEmptyRegexTest(unittest.TestCase):
+    """split(s, "(?=)") on 3.5.5 matched split(s, "") on 2.4.8 for "abc", "",
+    None, "a", "a,b,", "  ", an accented letter and a supplementary character
+    (spark-migrate-cli e2e/sql-diff/cases/split-empty-regex)."""
+
+    rule = "SplitEmptyRegexDetect"
+    manual = "SplitEmptyRegexDetect.Manual"
+
+    def _found(self, code):
+        module = cst.parse_module(HEADER + textwrap.dedent(code))
+        found, _ = detect(module, {self.rule})
+        return [(f["line"] - 1, f["rule"], f.get("tier")) for f in found]
+
+    def test_where_the_name_is_discarded_the_regex_is_rewritten(self):
+        code = """
+            a = df.withColumn("a", F.split("s", ""))
+            b = df.select(F.split(F.col("s"), '').alias("b"))
+            c = df.filter(F.size(F.split(df.s, "")) > 2)
+            e = df.select(F.size(F.split("s", pattern="")).name("e"))
+        """
+        self.assertEqual(self._found(code), [(i, self.rule, 1) for i in range(2, 6)])
+        out = rewritten(code, self.rule)
+        self.assertIn('a = df.withColumn("a", F.split("s", "(?=)"))', out)
+        self.assertIn("F.split(F.col(\"s\"), '(?=)').alias(\"b\")", out, "the quote style is kept")
+        self.assertIn('F.size(F.split(df.s, "(?=)")) > 2', out)
+        self.assertIn('F.split("s", pattern="(?=)")', out)
+
+    def test_a_generated_name_or_a_bound_pattern_is_manual(self):
+        code = """
+            sep = ""
+            a = df.select(F.split("s", ""))
+            b = F.split("s", "")
+            c = df.withColumn("c", F.split("s", sep))
+            ok = df.withColumn("ok", F.split("s", ","))
+        """
+        self.assertEqual(self._found(code), [(3, self.manual, 3), (4, self.manual, 3), (5, self.manual, 3)])
+        self.assertEqual(rewritten(code, self.rule), textwrap.dedent(code))
+
+
 class ReaderWriterFixTest(unittest.TestCase):
     def test_path_option_dropped_only_where_one_path_is_certain(self):
         rule = "PathOptionConflictDetect"

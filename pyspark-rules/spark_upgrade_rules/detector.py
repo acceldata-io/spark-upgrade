@@ -163,6 +163,46 @@ class Fixer(Rule, cst.CSTTransformer):
         return new
 
 
+class NameDiscarded:
+    """For a `Fixer` whose rewrite changes an expression's auto-generated
+    column name: tracks whether the visit is inside an expression whose name
+    Spark discards -- under .alias/.name, withColumn's value, or a
+    filter/where, orderBy/sort/sortWithinPartitions or join condition -- so
+    the rewrite is made only there (`self.unnamed_depth` > 0). Mix in before
+    `Fixer` and call `mark_unnamed` from `visit_Call`."""
+
+    def __init__(self, ctx: Context) -> None:
+        super().__init__(ctx)
+        self.unnamed: set[int] = set()
+        self.unnamed_depth = 0
+
+    def on_visit(self, node: cst.CSTNode) -> bool:
+        if id(node) in self.unnamed:
+            self.unnamed_depth += 1
+        return super().on_visit(node)
+
+    def on_leave(self, original_node: cst.CSTNode, updated_node: cst.CSTNode):
+        result = super().on_leave(original_node, updated_node)
+        if id(original_node) in self.unnamed:
+            self.unnamed_depth -= 1
+        return result
+
+    def mark_unnamed(self, node: cst.Call) -> None:
+        # Parents are visited before their arguments, so a scope is marked
+        # before anything inside it is reached.
+        name = _cst.method_name(node)
+        if name in ("alias", "name"):
+            self.unnamed.add(id(_cst.receiver(node)))
+        elif name == "withColumn":
+            self.unnamed.add(id(_cst.argument(node, 1, "col")))
+        elif name in ("filter", "where"):
+            self.unnamed.add(id(_cst.argument(node, 0, "condition")))
+        elif name in ("orderBy", "sort", "sortWithinPartitions"):
+            self.unnamed.update(id(a) for a in _cst.positional(node))
+        elif name == "join":
+            self.unnamed.add(id(_cst.argument(node, 1, "on")))
+
+
 def apply(module: cst.Module, rules: list[type], fix_ids: set) -> tuple[cst.Module, list[dict], list[dict]]:
     """Codegen: every `Fixer` in `fix_ids`, chained in `rules` order, each over
     the previous one's output. Returns the rewritten module, the Tier 1 sites

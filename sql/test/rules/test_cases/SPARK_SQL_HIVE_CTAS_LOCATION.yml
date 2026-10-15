@@ -27,3 +27,15 @@ datasource_ctas_is_l014_not_this_ok:
       dialect: sparksql
   pass_str: |
     CREATE TABLE t USING parquet LOCATION '/data/t' AS SELECT * FROM s
+
+hive_ddl_with_location_is_not_a_ctas_ok:
+  # STORED AS has an AS of its own; only an AS <query> makes a CTAS.
+  configs:
+    core:
+      dialect: sparksql
+  pass_str: |
+    CREATE EXTERNAL TABLE db.t (a STRING)
+    ROW FORMAT DELIMITED FIELDS TERMINATED BY ','
+    STORED AS TEXTFILE
+    LOCATION '/apps/x/'
+    TBLPROPERTIES ('skip.header.line.count' = '1')

@@ -34,6 +34,21 @@ Docstrings, and strings handed to logging, print or an exception, are never
 SQL. A defined statement sqlfluff cannot parse is not reported -- it may be a
 fragment or prose that happens to start like SQL -- so only rules that fire
 on it produce findings.
+
+Codegen rewrites only SQL that reaches Spark (the owner, 2026-10-15). A defined
+statement says whether it does in this module -- `reaches`: it is written in a
+`.sql(...)` argument, or bound once to a name a `.sql(...)` call here uses,
+directly or through `.format`/`%` -- and gives that `name`. A call site whose
+argument is an imported name gives `ref`, the import it resolves to
+(`jobs.queries.DAILY`, `.queries.DAILY`), so the CLI can tell a constant
+another module defines reaches Spark.
+
+One helper deep, too: a module-level function that hands one of its parameters
+to `.sql(...)` is a `sink` (`def run(spark, sql): return spark.sql(sql)`), and
+a call that passes a name into it is a `pass` -- `run(spark, DAILY)`,
+`sql_runner.run(spark, QUERIES[name])`. A definition inside a dict or list
+gives the `container` it sits in, so passing `QUERIES[name]` reaches every
+entry of `QUERIES`. The CLI joins sinks, passes and definitions across files.
 """
 from __future__ import annotations
 
@@ -147,6 +162,66 @@ def sql_definitions(module: cst.Module, consumed: set[str] | None = None) -> lis
     return found.found
 
 
+def _root(node: cst.BaseExpression) -> cst.BaseExpression:
+    """What a template call is built from: `t.format(...)` and `t % args` are `t`."""
+    while True:
+        if isinstance(node, cst.Call) and isinstance(node.func, cst.Attribute) and node.func.attr.value == "format":
+            node = node.func.value
+        elif isinstance(node, cst.BinaryOperation) and isinstance(node.operator, cst.Modulo):
+            node = node.left
+        else:
+            return node
+
+
+def _dotted(node: cst.BaseExpression) -> str | None:
+    if isinstance(node, cst.Name):
+        return node.value
+    if isinstance(node, cst.Attribute):
+        inner = _dotted(node.value)
+        return inner + "." + node.attr.value if inner else None
+    return None
+
+
+class _Imports(cst.CSTVisitor):
+    """Each imported name, as the dotted path it imports: `from .q import A as B`
+    binds B to `.q.A`; `import a.b as c` binds c to `a.b`, `import a.b` a to `a`."""
+
+    def __init__(self) -> None:
+        self.paths: dict[str, str] = {}
+
+    def visit_ImportFrom(self, node: cst.ImportFrom) -> None:
+        if isinstance(node.names, cst.ImportStar):
+            return
+        module = "." * len(node.relative) + (_dotted(node.module) or "")
+        for alias in node.names:
+            name = _dotted(alias.name)
+            bound = alias.asname.name.value if alias.asname else name
+            self.paths[bound] = (module + "." if module and not module.endswith(".") else module) + name
+
+    def visit_Import(self, node: cst.Import) -> None:
+        for alias in node.names:
+            name = _dotted(alias.name)
+            if alias.asname:
+                self.paths[alias.asname.name.value] = name
+            else:
+                self.paths[name.split(".")[0]] = name.split(".")[0]
+
+    def resolve(self, dotted: str | None) -> str | None:
+        if not dotted:
+            return None
+        head = dotted.split(".")[0]
+        return self.paths[head] + dotted[len(head):] if head in self.paths else None
+
+
+class _Ids(cst.CSTVisitor):
+    def __init__(self) -> None:
+        self.ids: set[int] = set()
+
+    def on_visit(self, node: cst.CSTNode) -> bool:
+        self.ids.add(id(node))
+        return True
+
+
 def _is_interpolated(node: cst.BaseExpression) -> bool:
     if isinstance(node, cst.FormattedString):
         return True
@@ -166,9 +241,14 @@ def _is_interpolated(node: cst.BaseExpression) -> bool:
 class _SqlCalls(cst.CSTVisitor):
     METADATA_DEPENDENCIES = (PositionProvider,)
 
-    def __init__(self, bindings: Bindings) -> None:
+    def __init__(self, bindings: Bindings, imports: _Imports | None = None) -> None:
         self.bindings = bindings
+        self.imports = imports or _Imports()
         self.found: list[dict] = []
+        # What reaches a `.sql(...)` call: every node of its argument, and the
+        # names its template is built from.
+        self.at_call: set[int] = set()
+        self.names: set[str] = set()
         # Each literal call site's text as written, before its fields are
         # filled: what a definition is matched against, so it is not linted twice.
         self.raw: set[str] = set()
@@ -181,6 +261,15 @@ class _SqlCalls(cst.CSTVisitor):
             return
         arg = positional[0].value
         line = self.get_metadata(PositionProvider, node).start.line
+        ids = _Ids()
+        arg.visit(ids)
+        self.at_call |= ids.ids
+        root = _root(arg)
+        if isinstance(root, cst.Subscript):  # QUERIES[name]: every entry of QUERIES
+            root = root.value
+        if isinstance(root, cst.Name):
+            self.names.add(root.value)
+        ref = self.imports.resolve(_dotted(root))
 
         text = _string_value(arg)
         if text is None and isinstance(arg, cst.Name):
@@ -192,22 +281,143 @@ class _SqlCalls(cst.CSTVisitor):
             self.raw.add(text)
             text = _FIELD.sub(PARAM, text)
             self.found.append({"line": line, "kind": LITERAL, "text": text})
-        elif _is_interpolated(arg):
-            self.found.append({"line": line, "kind": INTERPOLATED})
         else:
-            self.found.append({"line": line, "kind": DYNAMIC})
+            site = {"line": line, "kind": INTERPOLATED if _is_interpolated(arg) else DYNAMIC}
+            if ref:
+                site["ref"] = ref
+            # What `extract_sql` needs to tell whether this site's SQL was read
+            # where it is defined; removed before the site is returned.
+            site["_ids"] = ids.ids
+            site["_name"] = root.value if isinstance(root, cst.Name) else ""
+            self.found.append(site)
+
+
+class _Helpers(cst.CSTVisitor):
+    """Sinks -- module-level functions whose parameter reaches `.sql(...)` --
+    and passes -- calls that hand a name, or an item of one, to a function."""
+
+    METADATA_DEPENDENCIES = (PositionProvider,)
+
+    def __init__(self, imports: _Imports) -> None:
+        self.imports = imports
+        self.found: list[dict] = []
+        self.depth = 0
+
+    def visit_FunctionDef(self, node: cst.FunctionDef) -> None:
+        if self.depth == 0:
+            params = [p.name.value for p in node.params.params]
+            line = self.get_metadata(PositionProvider, node).start.line
+            for index, param in self._sunk(node, params):
+                self.found.append({"line": line, "kind": "sink", "name": node.name.value, "index": index, "keyword": param})
+        self.depth += 1
+
+    def leave_FunctionDef(self, node: cst.FunctionDef) -> None:
+        self.depth -= 1
+
+    def visit_ClassDef(self, node: cst.ClassDef) -> None:
+        self.depth += 1
+
+    def leave_ClassDef(self, node: cst.ClassDef) -> None:
+        self.depth -= 1
+
+    @staticmethod
+    def _sunk(node: cst.FunctionDef, params: list[str]) -> list[tuple[int, str]]:
+        found: set[str] = set()
+
+        class Calls(cst.CSTVisitor):
+            def visit_Call(self, call: cst.Call) -> None:
+                if isinstance(call.func, cst.Attribute) and call.func.attr.value == "sql" and call.args:
+                    root = _root(call.args[0].value)
+                    if isinstance(root, cst.Name) and root.value in params:
+                        found.add(root.value)
+
+        node.body.visit(Calls())
+        return [(i, p) for i, p in enumerate(params) if p in found]
+
+    def visit_Call(self, node: cst.Call) -> None:
+        if isinstance(node.func, cst.Attribute) and node.func.attr.value == "sql":
+            return
+        callee = _dotted(node.func)
+        if not callee:
+            return
+        resolved = self.imports.resolve(callee)
+        line = self.get_metadata(PositionProvider, node).start.line
+        index = 0
+        for a in node.args:
+            if a.star:
+                continue
+            value = _root(a.value)
+            if isinstance(value, cst.Subscript):
+                value = value.value
+            arg = _dotted(value)
+            if arg:
+                site = {"line": line, "kind": "pass", "callee": resolved or callee, "index": index if a.keyword is None else -1,
+                        "keyword": a.keyword.value if a.keyword is not None else ""}
+                arg_ref = self.imports.resolve(arg)
+                if arg_ref:
+                    site["ref"] = arg_ref
+                elif "." not in arg:
+                    site["name"] = arg
+                if "ref" in site or "name" in site:
+                    self.found.append(site)
+            if a.keyword is None:
+                index += 1
+
+
+def _containers(module: cst.Module) -> dict[int, str]:
+    """Each element of a dict or list bound to a name, to that name."""
+    found: dict[int, str] = {}
+
+    class Assigns(cst.CSTVisitor):
+        def visit_Assign(self, node: cst.Assign) -> None:
+            if len(node.targets) == 1 and isinstance(node.targets[0].target, cst.Name):
+                name = node.targets[0].target.value
+                if isinstance(node.value, cst.Dict):
+                    found.update((id(e.value), name) for e in node.value.elements if isinstance(e, cst.DictElement))
+                elif isinstance(node.value, (cst.List, cst.Tuple)):
+                    found.update((id(e.value), name) for e in node.value.elements)
+
+    module.visit(Assigns())
+    return found
 
 
 def extract_sql(module: cst.Module) -> list[dict]:
     """Every `.sql(...)` call site in `module`, in source order, as
-    `{"line": int, "kind": "literal"|"interpolated"|"dynamic", "text": str}`
-    -- `text` only for literals -- then every defined statement, as
-    `{"line": int, "kind": "defined", "text": str}`."""
+    `{"line": int, "kind": "literal"|"interpolated"|"dynamic", "text": str, "ref": str, "read": bool}`
+    -- `text` only for literals, `ref` only for an imported name, `read` when the
+    site's SQL is linted where it is defined in this module -- then every
+    defined statement, as
+    `{"line": int, "kind": "defined", "text": str, "name": str, "container": str, "reaches": bool}`,
+    then every sink, `{"line", "kind": "sink", "name": function, "index": int, "keyword": parameter}`,
+    and pass, `{"line", "kind": "pass", "callee": str, "index": int (-1 for a keyword argument),
+    "keyword": str, "name" | "ref": str}`."""
     wrapper = MetadataWrapper(module, unsafe_skip_copy=True)
-    calls = _SqlCalls(bindings_of(module))
+    bindings = bindings_of(module)
+    imports = _Imports()
+    module.visit(imports)
+    calls = _SqlCalls(bindings, imports)
     wrapper.visit(calls)
     positions = wrapper.resolve(PositionProvider)
     consumed = calls.raw
-    defined = [{"line": positions[node].start.line, "kind": DEFINED, "text": text}
-               for node, text in sql_definitions(module, consumed)]
-    return calls.found + defined
+    bound = {id(v): k for k, v in bindings.value.items() if bindings.count.get(k) == 1}
+    containers = _containers(module)
+    defined = []
+    for node, text in sql_definitions(module, consumed):
+        name = bound.get(id(node), "")
+        container = containers.get(id(node), "")
+        defined.append({"line": positions[node].start.line, "kind": DEFINED, "text": text, "name": name,
+                        "container": container,
+                        "reaches": id(node) in calls.at_call or name in calls.names or container in calls.names})
+    # A call site whose SQL was linted where it is defined -- an f-string or a
+    # template written in its argument, or a name bound in this file to a
+    # statement or to a registry of them -- is `read`, not a call site for a
+    # person. An imported name is resolved by the CLI (`ref`).
+    read_nodes = {id(node) for node, _ in sql_definitions(module, consumed)}
+    read_names = {d["name"] for d in defined if d["name"]} | {d["container"] for d in defined if d["container"]}
+    for site in calls.found:
+        ids, name = site.pop("_ids", set()), site.pop("_name", "")
+        if site["kind"] in (INTERPOLATED, DYNAMIC) and (ids & read_nodes or name in read_names):
+            site["read"] = True
+    helpers = _Helpers(imports)
+    wrapper.visit(helpers)
+    return calls.found + defined + helpers.found

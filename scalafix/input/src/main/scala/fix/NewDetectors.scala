@@ -44,7 +44,9 @@ object NewDetectors {
 
   def jsonWithSchema(spark: SparkSession): Unit = {
     val schema = StructType(Seq(StructField("n", IntegerType)))
-    spark.read.schema(schema).json("/tmp/in.json")// assert: JsonEmptyStringDetect
+    spark.read.schema(schema).option("mode", "FAILFAST").json("/tmp/in.json")// assert: JsonEmptyStringDetect
+    // PERMISSIVE (the default) gives 2.4's row -- must NOT be flagged
+    spark.read.schema(schema).json("/tmp/in.json")
     // inferred schema -- nothing to reject, must NOT be flagged
     spark.read.json("/tmp/in.json")
   }

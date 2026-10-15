@@ -207,7 +207,7 @@ class FunctionRulesTest(unittest.TestCase):
             ok = F.split("s", ",")
             g = df.cube("c").agg(F.grouping_id())
         """
-        self.assertEqual(lines(code, "SplitEmptyRegexDetect"), [2])
+        self.assertEqual(lines(code, "SplitEmptyRegexDetect.Manual"), [2], "a generated name: not rewritten (test_fix)")
         self.assertEqual(lines(code, "GroupingIdTypeDetect"), [4])
 
 
@@ -471,7 +471,7 @@ class ContractTest(unittest.TestCase):
         self.assertEqual(len(ids), len(set(ids)))
         module = cst.parse_module(HEADER + "a = F.add_months('d', 1)\nb = F.split('s', '')\n")
         found, _ = detect(module, {"SplitEmptyRegexDetect"})
-        self.assertEqual([f["rule"] for f in found], ["SplitEmptyRegexDetect"])
+        self.assertEqual([f["rule"] for f in found], ["SplitEmptyRegexDetect.Manual"])
 
     def test_a_detector_that_raises_is_an_error_record_not_a_crash(self):
         from spark_upgrade_rules import detector as d

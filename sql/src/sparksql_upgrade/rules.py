@@ -152,10 +152,14 @@ class Rule_FORMATSTRONEINDEX_L004(BaseRule):
 
 
 class Rule_NOCHARS_L003(BaseRule):
-    """Spark 3.0 No longer supports CHAR type in non-Hive tables.
+    """Spark 3.1 honours CHAR(n) and VARCHAR(n) types.
 
-    In Spark 2.4 the CHAR type was treated as a String type anyways so we'll
-    just rewrite all CHAR types to String types.
+    In Spark 2.4 both were plain strings: never padded, never cut, any
+    length stored. From 3.1 a CHAR(n) value is padded to n and a VARCHAR(n)
+    value longer than n fails the write. Rewriting either to string gives
+    2.4's values, lengths and column type on 3.5.5, in data-source and
+    Hive-format tables and in CAST (spark-migrate-cli e2e/sql-diff
+    cases l003-*).
     """
 
     groups = ("all",)
@@ -163,15 +167,15 @@ class Rule_NOCHARS_L003(BaseRule):
     is_fix_compatible = True
 
     def _eval(self, context: RuleContext) -> Optional[LintResult]:
-        """Check for char types."""
+        """Check for char and varchar types."""
         type_name = context.segment.raw.lower()
-        if type_name.startswith("char"):
+        if type_name.startswith("char") or type_name.startswith("varchar"):
             return LintResult(
                 anchor=context.segment,
-                description=f"char type found ({type_name}) in {context} see "
-                "https://archive.apache.org/dist/spark/docs/3.0.0/sql-migration-guide.html for migration"
-                "advice. In Spark 2.4 on non-Hive tables these were treated as strings so "
-                "rewritting to string.",
+                description=f"{type_name} type found in {context}: Spark 3.1 pads CHAR(n) values to n and "
+                "fails the write of a VARCHAR(n) value longer than n; Spark 2.4 treated both as string, "
+                "so rewriting to string. See "
+                "https://spark.apache.org/docs/latest/sql-migration-guide.html#upgrading-from-spark-sql-30-to-31",
                 fixes=[LintFix.replace(context.segment, [CodeSegment(raw="string")])],
             )
         else:
@@ -840,7 +844,9 @@ def _ctas_location(segment) -> bool:
     """Whether a ``create_table_statement`` is a CTAS with a location: a
     LOCATION clause, or a 'path' in OPTIONS, and an ``AS <query>``."""
     keywords = [s.raw_upper for s in segment.segments if s.is_type("keyword")]
-    if "AS" not in keywords:
+    # `STORED AS <format>` is not the CTAS's AS: a plain Hive DDL with a
+    # LOCATION has one too.
+    if not any(k == "AS" and (i == 0 or keywords[i - 1] != "STORED") for i, k in enumerate(keywords)):
         return False
     if "LOCATION" in keywords:
         return True

@@ -9,7 +9,7 @@ import libcst as cst
 from libcst.helpers import get_full_name_for_node
 
 from spark_upgrade_rules import _cst
-from spark_upgrade_rules.detector import Detector, Fixer
+from spark_upgrade_rules.detector import Detector, Fixer, NameDiscarded
 
 
 def _collection_args(call: cst.Call) -> list[cst.BaseExpression] | None:
@@ -201,14 +201,45 @@ class HashOnMapTypeDetect(Detector):
                               "instead, or set spark.sql.legacy.allowHashOnMapType=true.")
 
 
-class SplitEmptyRegexDetect(Detector):
+_SPLIT = ("split(col, \"\") splits on an empty regex. Since Spark 3.4 the result has no trailing empty string "
+          "(\"abc\" -> [a, b, c], where 2.4 gave [a, b, c, '']); no config restores it.")
+
+
+class SplitEmptyRegexDetect(NameDiscarded, Fixer):
+    """`split(col, "")`: since 3.4 the result has no trailing empty string.
+    Rewritten to `split(col, "(?=)")` -- a zero-width match at every position,
+    what 2.4's Java `String.split` did with "" -- probed on 2.4.8 and 3.5.5 for
+    "abc", "", None, one character, separators, spaces, accented letters and
+    a supplementary character: the same arrays (and 2.4.8 runs it too). The
+    rewrite renames an unaliased result column (`split(s, )` on 2.4,
+    `split(s, (?=), -1)` on 3.5.5), so it is made only where the generated
+    name is discarded; elsewhere, and for a pattern bound to a name, it is
+    `SplitEmptyRegexDetect.Manual`. PySpark 2.4's split takes no limit, so
+    only the two-argument form is matched."""
+
     rule_id = "SplitEmptyRegexDetect"
+    MANUAL = "SplitEmptyRegexDetect.Manual"
 
     def visit_Call(self, node: cst.Call) -> None:
-        if self.function(node, "split") and self.string(_cst.argument(node, 1, "pattern")) == "":
-            self.report(node, 'split(col, "") splits on an empty regex. Since Spark 3.4 the result has no trailing empty string '
-                              "(\"abc\" -> [a, b, c], where 2.4 gave [a, b, c, '']). No config restores it; check code that "
-                              "indexes or counts the result.")
+        self.mark_unnamed(node)
+
+    def leave_Call(self, original_node: cst.Call, updated_node: cst.Call) -> cst.BaseExpression:
+        pattern = _cst.argument(original_node, 1, "pattern")
+        if not self.function(original_node, "split") or self.string(pattern) != "" or \
+                _cst.argument(original_node, 2, "limit") is not None:
+            return updated_node
+        if not self.unnamed_depth or not isinstance(pattern, cst.SimpleString):
+            self.report(original_node, f"{_SPLIT} The rewrite that keeps 2.4's result, split(col, \"(?=)\"), would rename "
+                                       "the result column, so it is not made here. Use it with .alias(...) of the current "
+                                       "name if anything reads the column by name.", tier=3, rule_id=self.MANUAL)
+            return updated_node
+        quote = len(pattern.prefix)
+        half = quote + (len(pattern.value) - quote) // 2
+        new = pattern.with_changes(value=pattern.value[:half] + "(?=)" + pattern.value[half:])
+        at = [a.value for a in original_node.args].index(pattern)
+        args = [a.with_changes(value=new) if i == at else a for i, a in enumerate(updated_node.args)]
+        return self.rewrite(original_node, updated_node.with_changes(args=args),
+                            f"{_SPLIT} Rewritten to split(col, \"(?=)\"), which gives 2.4's result on Spark 3.x too.")
 
 
 class GroupingIdTypeDetect(Detector):
