@@ -34,3 +34,10 @@ hive_ctas_is_l015_not_this_ok:
       dialect: sparksql
   pass_str: |
     CREATE TABLE t STORED AS PARQUET LOCATION '/data/t' AS SELECT * FROM s
+
+datasource_ddl_with_location_is_not_a_ctas_ok:
+  configs:
+    core:
+      dialect: sparksql
+  pass_str: |
+    CREATE TABLE t (a STRING) USING parquet LOCATION '/data/t'

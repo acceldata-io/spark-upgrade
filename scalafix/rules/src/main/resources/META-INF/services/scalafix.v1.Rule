@@ -14,6 +14,7 @@ fix.MigrateTrigger
 fix.MultiLineDatasetReadWarn
 fix.ExpressionEncoder
 fix.SparkSQLCallExternal
+fix.SparkSqlExtract
 fix.AllEquivalentExprs
 fix.AnsiModeEnabledWarn
 fix.MesosRemovedWarn
@@ -40,6 +41,7 @@ fix.AnalysisExceptionPlanFieldDetect
 fix.UserDefinedAggregateFunctionDetect
 fix.NegativeDecimalScaleDetect
 fix.SetCommandSparkConfDetect
+fix.CommandOutputSchemaDetect
 fix.CsvBomMultilineDetect
 fix.ShuffleWriteMetricsRenameDetect
 fix.IsRunningLocallyWarn

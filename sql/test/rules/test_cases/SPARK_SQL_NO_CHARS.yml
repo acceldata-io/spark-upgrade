@@ -1,0 +1,54 @@
+rule: NOCHARS_L003
+
+char_column:
+  configs:
+    core:
+      dialect: sparksql
+  fail_str: |
+    CREATE TABLE t (id INT, code CHAR(5)) USING parquet
+  fix_str: |
+    CREATE TABLE t (id INT, code string) USING parquet
+
+# 3.1 enforces the length: inserting 'abcd' into VARCHAR(3) fails; 2.4 kept it.
+varchar_column:
+  configs:
+    core:
+      dialect: sparksql
+  fail_str: |
+    CREATE TABLE t (id INT, code VARCHAR(3), note varchar(10)) USING parquet
+  fix_str: |
+    CREATE TABLE t (id INT, code string, note string) USING parquet
+
+varchar_hive_table:
+  configs:
+    core:
+      dialect: sparksql
+  fail_str: |
+    CREATE TABLE t (id INT, code VARCHAR(3)) STORED AS PARQUET
+  fix_str: |
+    CREATE TABLE t (id INT, code string) STORED AS PARQUET
+
+varchar_cast:
+  configs:
+    core:
+      dialect: sparksql
+  fail_str: |
+    SELECT CAST(code AS VARCHAR(3)) AS c, cast(id AS char(2)) AS i FROM src
+  fix_str: |
+    SELECT CAST(code AS string) AS c, cast(id AS string) AS i FROM src
+
+varchar_nested:
+  configs:
+    core:
+      dialect: sparksql
+  fail_str: |
+    CREATE TABLE t (s STRUCT<x: VARCHAR(5)>, a ARRAY<CHAR(1)>) USING parquet
+  fix_str: |
+    CREATE TABLE t (s STRUCT<x: string>, a ARRAY<string>) USING parquet
+
+string_and_other_types:
+  configs:
+    core:
+      dialect: sparksql
+  pass_str: |
+    CREATE TABLE t (id INT, code STRING, amount DECIMAL(10, 2), ts TIMESTAMP) USING parquet

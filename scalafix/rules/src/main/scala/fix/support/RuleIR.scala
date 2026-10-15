@@ -77,6 +77,13 @@ object RuleRegistry {
       defaultConfidence = "high"
     ),
     RuleMeta(
+      ruleId = "SparkSqlExtract",
+      tier = 3,
+      description = "Plumbing for spark-migrate-cli, not a migration finding: the SQL text of each spark.sql(...)/sqlContext.sql(...) argument -- a literal, a template with its run-time parts as __param__, or dynamic -- which the CLI lints with the SQL linter every language path shares.",
+      docLink = "",
+      defaultConfidence = "high"
+    ),
+    RuleMeta(
       ruleId = "SqlInStringDetect",
       tier = 3,
       description = "Flags spark.sql(...)/sqlContext.sql(...) call sites whose SQL is string-interpolated or dynamically built -- the shapes no other SQL rule in this jar can inspect, since they all require a literal argument. A literal argument is not flagged here; it's covered directly by SparkSQLCallExternal and the Scala-regex Family K rules.",
@@ -240,7 +247,7 @@ object RuleRegistry {
     RuleMeta(
       ruleId = "DateTimeFormatPatternValidator",
       tier = 2,
-      description = "Flags datetime format pattern strings using letters ('hh' without 'a', or 'F') whose meaning changed under Spark 3.0's DateTimeFormatter. Feeds spark.sql.legacy.timeParserPolicy.",
+      description = "Flags datetime format pattern strings Spark 3.0's DateTimeFormatter rejects or reads differently from 2.4's SimpleDateFormat: week-based letters (Y w W u), parsing with E or F, five-letter text forms, letter counts over DateTimeFormatter's limits, the reserved # { } and [ ], F when formatting, and h without a when parsing (the PySpark rule's probed table). Feeds spark.sql.legacy.timeParserPolicy.",
       docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
       defaultConfidence = "medium"
     ),
@@ -361,12 +368,22 @@ object RuleRegistry {
       docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
       defaultConfidence = "high"
     ),
+    // Tier 1 since 2026-10-15: split(s, "(?=)") on 3.5.5 gave 2.4.8's
+    // split(s, "") for every input probed, and runs on 2.4 too (not
+    // targetOnly). Applied only where the generated column name is discarded.
     RuleMeta(
       ruleId = "SplitEmptyRegexDetect",
-      tier = 3,
-      description = "Flags split(col, \"\") with a literal empty-string regex -- Spark 3.4 changed how trailing empty strings are handled in the result array.",
+      tier = 1,
+      description = "Since Spark 3.4, split(col, \"\") no longer ends the result with an empty string (\"abc\" -> [a, b, c], where 2.4 gave [a, b, c, \"\"]); no config restores it. Rewritten to split(col, \"(?=)\"), which gives 2.4's result on both versions. Applied only where the expression's auto-generated column name is discarded (aliased, withColumn's value, or a filter/where/orderBy/sort/join argument), since the rewrite changes that name.",
       docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
-      defaultConfidence = "medium"
+      defaultConfidence = "high"
+    ),
+    RuleMeta(
+      ruleId = "SplitEmptyRegexDetect.Manual",
+      tier = 3,
+      description = "Since Spark 3.4, split(col, \"\") no longer ends the result with an empty string, and this call was not rewritten because its result may become a named output column whose auto-generated name the rewrite would change. Use split(col, \"(?=)\") to keep 2.4's result, and alias it .as(\"<original name>\") if the column name matters.",
+      docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
+      defaultConfidence = "high"
     ),
     RuleMeta(
       ruleId = "SelfJoinAmbiguousColumnDetect",
@@ -421,6 +438,15 @@ object RuleRegistry {
       description = "Flags DecimalType(precision, scale) constructed with a literal negative scale, which Spark 3.0 rejects by default. Feeds spark.sql.legacy.allowNegativeScaleOfDecimal.",
       docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
       defaultConfidence = "high"
+    ),
+    // Ported from pyspark-rules 2026-10-15. Its config is in the CLI's
+    // baseline set, so the finding counts as done for the user.
+    RuleMeta(
+      ruleId = "CommandOutputSchemaDetect",
+      tier = 2,
+      description = "Flags SHOW DATABASES/SHOW TABLES/DESCRIBE DATABASE in embedded SQL: Spark 3.0 renamed their output columns (databaseName/database -> namespace, database_description_item/value -> info_name/info_value), so code reading the result by the 2.4 name fails. Feeds spark.sql.legacy.keepCommandOutputSchema.",
+      docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
+      defaultConfidence = "medium"
     ),
     RuleMeta(
       ruleId = "SetCommandSparkConfDetect",
@@ -519,7 +545,7 @@ object RuleRegistry {
     RuleMeta(
       ruleId = "JsonEmptyStringDetect",
       tier = 2,
-      description = "Flags a JSON read with an explicit schema; from Spark 3.0 an empty string is rejected for non-string fields instead of being read as null. Feeds spark.sql.legacy.json.allowEmptyString.enabled.",
+      description = "Flags a JSON read with an explicit schema whose mode makes a malformed record visible -- FAILFAST, DROPMALFORMED, a corrupt-record column, or a mode the rule cannot read: from Spark 3.0 an empty string in a non-string field makes the record malformed (the job fails, the row is dropped, or the column fills), where 2.4 read it as null. In the default PERMISSIVE mode 3.5.5 gives 2.4's row (probed), so that read is not flagged. Feeds spark.sql.legacy.json.allowEmptyString.enabled.",
       docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
       defaultConfidence = "medium"
     ),

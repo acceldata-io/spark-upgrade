@@ -9,6 +9,7 @@ import com.acceldata.openrewrite.spark.SparkAddMonthsRewrite;
 import com.acceldata.openrewrite.spark.SparkAddMonthsUsageWarn;
 import com.acceldata.openrewrite.spark.SparkAnalysisExceptionPlanUsageDetect;
 import com.acceldata.openrewrite.spark.SparkCalendarIntervalUsageDetect;
+import com.acceldata.openrewrite.spark.SparkCommandOutputSchemaDetect;
 import com.acceldata.openrewrite.spark.SparkCompileBreakDetect;
 import com.acceldata.openrewrite.spark.SparkCompileBreakRewrite;
 import com.acceldata.openrewrite.spark.SparkDateTimeFormatPatternDetect;
@@ -138,6 +139,7 @@ public final class RecipeCatalog {
         byId.put(SparkIsRunningLocallyDetect.class.getName(), new SparkIsRunningLocallyDetect());
         byId.put(SparkJsonEmptyStringDetect.class.getName(), new SparkJsonEmptyStringDetect());
         byId.put(SparkStoreAssignmentPolicyDetect.class.getName(), new SparkStoreAssignmentPolicyDetect());
+        byId.put(SparkCommandOutputSchemaDetect.class.getName(), new SparkCommandOutputSchemaDetect());
         byId.put(SparkDateTimeStringComparisonDetect.class.getName(), new SparkDateTimeStringComparisonDetect());
         byId.put(SparkSaveAsTablePathDetect.class.getName(), new SparkSaveAsTablePathDetect());
         byId.put(SparkCalendarIntervalUsageDetect.class.getName(), new SparkCalendarIntervalUsageDetect());

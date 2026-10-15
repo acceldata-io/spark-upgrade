@@ -4,7 +4,6 @@ import fix.support.{RuleChange, RuleFinding}
 import scalafix.v1._
 
 import scala.meta._
-import scala.util.matching.Regex
 
 /**
  * Tier 2 / Class A (SQL migration guide, 2.4 -> 3.0): a write into an existing
@@ -17,7 +16,9 @@ import scala.util.matching.Regex
  *
  * Probed on 3.5.5 against 2.4.8: the three shapes that write into a table's
  * existing schema fail, and LEGACY gives 2.4.8's rows exactly --
- *   - `INSERT INTO|OVERWRITE [TABLE] t ...` in embedded SQL;
+ *   - `INSERT INTO|OVERWRITE [TABLE] t ...` in embedded SQL (reported by
+ *     spark-migrate-cli's shared SQL linter, from `SparkSqlExtract`'s text,
+ *     so a template is read too -- as the Java recipe leaves it);
  *   - `DataFrameWriter.insertInto`;
  *   - `DataFrameWriter.saveAsTable` in append mode.
  * `saveAsTable` in any other mode, CTAS and `INSERT OVERWRITE DIRECTORY` take
@@ -33,18 +34,10 @@ import scala.util.matching.Regex
  */
 class StoreAssignmentPolicyDetect extends SemanticRule("StoreAssignmentPolicyDetect") {
   override val description =
-    "Flags a write into an existing table (SQL INSERT, insertInto, saveAsTable in append mode); from Spark 3.0 an unsafe type conversion fails it instead of casting."
+    "Flags a write into an existing table (insertInto, saveAsTable in append mode; a SQL INSERT is spark-migrate-cli's SQL linter's); from Spark 3.0 an unsafe type conversion fails it instead of casting."
 
-  private val sqlMatcher = SymbolMatcher.normalized(
-    "org.apache.spark.sql.SparkSession.sql",
-    "org.apache.spark.sql.SQLContext.sql"
-  )
   private val insertIntoMatcher = SymbolMatcher.normalized("org.apache.spark.sql.DataFrameWriter.insertInto")
   private val saveAsTableMatcher = SymbolMatcher.normalized("org.apache.spark.sql.DataFrameWriter.saveAsTable")
-
-  // An INSERT into a table: not INSERT OVERWRITE [LOCAL] DIRECTORY, whose
-  // schema is the query's own.
-  private val insertStatement: Regex = """(?i)\bINSERT\s+(?:INTO|OVERWRITE)\s+(?!(?:LOCAL\s+)?DIRECTORY\b)""".r
 
   private val Change =
     "No auto-rewrite; cast each value to its column's type in the write, or inject spark.sql.storeAssignmentPolicy=LEGACY " +
@@ -83,8 +76,6 @@ class StoreAssignmentPolicyDetect extends SemanticRule("StoreAssignmentPolicyDet
 
   override def fix(implicit doc: SemanticDocument): Patch = {
     doc.tree.collect {
-      case Term.Apply(sqlMatcher(_), List(lit @ Lit.String(sql))) if insertStatement.findFirstIn(sql).isDefined =>
-        finding("This SQL INSERT", lit)
       case t @ Term.Apply(Term.Select(_, insertIntoMatcher(_)), _) =>
         finding("insertInto", t)
       case t @ Term.Apply(Term.Select(recv, saveAsTableMatcher(_)), _) if modeOf(recv).exists(_ != NotAppend) =>
