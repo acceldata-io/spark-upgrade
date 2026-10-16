@@ -210,15 +210,53 @@ class SparkCompileBreakRewriteTest implements RewriteTest {
     }
 
     @Test
-    void base64LeavesOtherUses() {
-        // A call on something other than a byte[] variable, and the decoder, stay: so does the import.
+    void base64OfAnExpressionGoesThroughOneHelper() {
+        // The rewrite reads its argument three times: an expression is passed to a helper on the
+        // top-level class instead, evaluated once. The user trial's billing-java shape.
+        rewriteRun(spec -> spec.recipe(recipe("SunMiscBase64")),
+                java(
+                        """
+                        import java.nio.charset.StandardCharsets;
+                        class A {
+                            static String a(String id) {
+                                return new sun.misc.BASE64Encoder().encode(id.getBytes(StandardCharsets.UTF_8));
+                            }
+                            static class B {
+                                String b(byte[][] rows) { return new sun.misc.BASE64Encoder().encodeBuffer(rows[0]).trim(); }
+                            }
+                        }
+                        """,
+                        """
+                        import java.nio.charset.StandardCharsets;
+                        import java.util.Base64;
+
+                        class A {
+                            static String a(String id) {
+                                return sunBase64Encode(id.getBytes(StandardCharsets.UTF_8));
+                            }
+                            static class B {
+                                String b(byte[][] rows) { return sunBase64EncodeBuffer(rows[0]).trim(); }
+                            }
+
+                            private static String sunBase64Encode(byte[] bytes) {
+                                return Base64.getMimeEncoder(76, System.lineSeparator().getBytes()).encodeToString(bytes) + (bytes.length > 0 && bytes.length % 57 == 0 ? System.lineSeparator() : "");
+                            }
+
+                            private static String sunBase64EncodeBuffer(byte[] bytes) {
+                                return Base64.getMimeEncoder(76, System.lineSeparator().getBytes()).encodeToString(bytes) + (bytes.length > 0 ? System.lineSeparator() : "");
+                            }
+                        }
+                        """));
+    }
+
+    @Test
+    void base64LeavesTheDecoder() {
+        // The decoder stays (see the class comment): so does its import.
         rewriteRun(spec -> spec.recipe(recipe("SunMiscBase64")),
                 java(
                         """
                         import sun.misc.BASE64Decoder;
-                        import sun.misc.BASE64Encoder;
                         class A {
-                            String a(byte[] b) { return new BASE64Encoder().encode(b.clone()); }
                             byte[] c(String s) throws Exception { return new BASE64Decoder().decodeBuffer(s); }
                         }
                         """));

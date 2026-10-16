@@ -39,7 +39,13 @@ class ArrayTypeSchemaInference(Detector):
     When the rows are literals in the code, the change is decidable: a
     collection mixing element types is flagged high, and literal rows with none
     are not flagged. Otherwise the data is not visible, and the call site is
-    flagged low -- one repo-wide decision, since one config settles them all."""
+    flagged low -- one repo-wide decision, since one config settles them all.
+
+    Rows that are a DataFrame's own (`df.rdd`, through row-preserving calls and
+    `map` lambdas that only pick the row's fields, the user trial's
+    `df.rdd.map(lambda r: (r[0], r[2])).toDF([...])`) are not flagged: an array
+    or map column has one element type, so its values infer the same under
+    either rule."""
 
     rule_id = "ArrayTypeSchemaInference"
 
@@ -76,8 +82,10 @@ class ArrayTypeSchemaInference(Detector):
             return
         # 3.5.5 ignores the legacy flag for an RDD's first row, so an RDD call
         # site is not restored by the config the CLI injects (probed).
+        if self._dataframe_rows(_cst.receiver(node) if name == "toDF" else data):
+            return
         rdd_id = f"{self.rule_id}.Rdd" if name == "toDF" or self._is_rdd(data) else None
-        rows = self._literal_rows(data)
+        rows = self._literal_rows(_cst.receiver(node) if name == "toDF" else data)
         if rows is None:
             self.report(node, f"{name}(...) infers its schema from Python data this rule cannot see. From Spark 3.4 an "
                               "array's or map's element type is merged across all elements, not taken from the first: "
@@ -93,6 +101,43 @@ class ArrayTypeSchemaInference(Detector):
     _RDD_METHODS = {"parallelize", "map", "flatMap", "filter", "union", "distinct", "repartition", "coalesce",
                     "mapPartitions", "reduceByKey", "groupByKey", "sortBy", "textFile"}
 
+    # RDD calls that keep each row as it was.
+    _ROW_PRESERVING = {"filter", "distinct", "repartition", "coalesce", "sample", "sortBy", "cache", "persist"}
+
+    def _dataframe_rows(self, data: cst.BaseExpression | None) -> bool:
+        """`df.rdd`, then only row-preserving calls and `map(lambda r: <r's fields>)`:
+        every value is one of the DataFrame's typed columns."""
+        while isinstance(data, cst.Call):
+            name = _cst.method_name(data)
+            if name == "map":
+                fn = _cst.argument(data, 0, "f")
+                if not (isinstance(fn, cst.Lambda) and self._picks_fields(fn)):
+                    return False
+            elif name not in self._ROW_PRESERVING:
+                return False
+            data = _cst.receiver(data)
+        return isinstance(data, cst.Attribute) and data.attr.value == "rdd"
+
+    @staticmethod
+    def _picks_fields(fn: cst.Lambda) -> bool:
+        """`lambda r: (r[0], r.x, r["y"])`, or a single field: nothing built from the values."""
+        params = fn.params.params
+        if len(params) != 1 or not isinstance(fn.params.star_arg, cst.MaybeSentinel):
+            return False
+        row = params[0].name.value
+
+        def field(e: cst.BaseExpression) -> bool:
+            if isinstance(e, cst.Attribute):
+                return isinstance(e.value, cst.Name) and e.value.value == row
+            if isinstance(e, cst.Subscript):
+                return isinstance(e.value, cst.Name) and e.value.value == row and len(e.slice) == 1 and \
+                    isinstance(e.slice[0].slice, cst.Index) and _cst.literal_value(e.slice[0].slice.value) is not None
+            return False
+        body = fn.body
+        if isinstance(body, (cst.Tuple, cst.List)):
+            return all(not isinstance(el, cst.StarredElement) and field(el.value) for el in body.elements)
+        return field(body)
+
     def _is_rdd(self, data: cst.BaseExpression | None) -> bool:
         """Data that is visibly an RDD: `df.rdd`, `sc.parallelize(...)`, `x.map(...)` and the like."""
         if isinstance(data, cst.Attribute) and data.attr.value == "rdd":
@@ -105,6 +150,9 @@ class ArrayTypeSchemaInference(Detector):
             _cst.string_value(el.value) is not None for el in schema.elements)
 
     def _literal_rows(self, data: cst.BaseExpression | None) -> list | None:
+        # `sc.parallelize(rows)`: the rows are its argument.
+        if isinstance(data, cst.Call) and _cst.method_name(data) == "parallelize":
+            data = _cst.argument(data, 0, "c")
         if isinstance(data, cst.Name):
             # The innermost function that binds the name decides; a name no
             # function binds is the module's.

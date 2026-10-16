@@ -6,10 +6,13 @@ import org.openrewrite.TreeVisitor;
 import org.openrewrite.java.JavaIsoVisitor;
 import org.openrewrite.java.MethodMatcher;
 import org.openrewrite.java.tree.J;
+import org.openrewrite.java.tree.JavaType;
 import org.openrewrite.marker.SearchResult;
 
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Java-side counterpart to the Scalafix {@code AccumulatorUpgrade} rule:
@@ -21,13 +24,9 @@ import java.util.List;
  * against the real {@code spark-core_2.11-2.4.8.jar} (2026-09-24) that every
  * matcher below resolves on {@code JavaSparkContext}.
  *
- * <p>Detect-only, unlike the Scala rule's Tier 1 auto-rewrite: the Scala
- * rule can safely rewrite because it distinguishes the 0L/0.0 zero-initial-
- * value shape (an exact, semantics-preserving substitution) from every other
- * shape (which it neutralizes to compilable-but-manual-review code). Doing
- * the same from a {@code J.MethodInvocation} visitor would need the same
- * literal-argument-shape analysis; not attempted this pass, so every match
- * here is reported for manual review rather than risking a wrong rewrite.
+ * <p>Reports the calls {@link SparkAccumulatorV1Rewrite} does not rewrite: a
+ * non-zero initial value, a variable used other than through add/value, a
+ * call that does not initialise a declaration.
  */
 public class SparkAccumulatorV1Detect extends Recipe {
 
@@ -52,9 +51,21 @@ public class SparkAccumulatorV1Detect extends Recipe {
     @Override
     public TreeVisitor<?, ExecutionContext> getVisitor() {
         return new JavaIsoVisitor<ExecutionContext>() {
+            private Map<JavaType.Variable, String> rewritten = Collections.emptyMap();
+
+            @Override
+            public J.CompilationUnit visitCompilationUnit(J.CompilationUnit cu, ExecutionContext ctx) {
+                rewritten = SparkAccumulatorV1Rewrite.rewritten(cu);
+                return super.visitCompilationUnit(cu, ctx);
+            }
+
             @Override
             public J.MethodInvocation visitMethodInvocation(J.MethodInvocation method, ExecutionContext ctx) {
+                boolean handled = SparkAccumulatorV1Rewrite.handles(method, rewritten, getCursor());
                 J.MethodInvocation m = super.visitMethodInvocation(method, ctx);
+                if (handled) {
+                    return m;
+                }
                 for (MethodMatcher matcher : MATCHERS) {
                     if (matcher.matches(m)) {
                         return SearchResult.found(

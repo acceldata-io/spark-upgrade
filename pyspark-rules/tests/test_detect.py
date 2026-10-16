@@ -391,12 +391,36 @@ class PySparkGuide34Test(unittest.TestCase):
             b = df.toDF("id", "name")
             c = rdd.toDF()
             d = rdd.toDF(["id", "tags"], 0.5)
-            e = spark.createDataFrame(df.rdd)
-            f = spark.createDataFrame(sc.parallelize(rows))
+            e = spark.createDataFrame(sc.parallelize(rows))
         """
         self.assertEqual(run(code, "ArrayTypeSchemaInference"), [])
         found = run(code, "ArrayTypeSchemaInference.Rdd")
-        self.assertEqual([(f["line"] - 2, f["confidence"]) for f in found], [(4, "low"), (5, "low"), (6, "low"), (7, "low")])
+        self.assertEqual([(f["line"] - 2, f["confidence"]) for f in found], [(4, "low"), (5, "low"), (6, "low")])
+
+    def test_array_inference_reads_literal_rows_through_parallelize(self):
+        # Rows the rule can see are decided: mixed is reported high (must fix), uniform not at all.
+        code = """
+            a = sc.parallelize([("a", [1, 2.5])]).toDF(["k", "vs"])
+            b = spark.createDataFrame(sc.parallelize([("a", [1, 2])]))
+            c = sc.parallelize(rows).toDF()
+        """
+        found = run(code, "ArrayTypeSchemaInference.Rdd")
+        self.assertEqual([(f["line"] - 2, f["confidence"]) for f in found], [(2, "high"), (4, "low")])
+
+    def test_array_inference_skips_a_dataframes_own_rows(self):
+        # A typed column holds one element type, so its values infer the same under either
+        # rule (the 2026-10-16 user trial's must-fix noise on marketing-pyspark).
+        code = """
+            a = df.rdd.map(lambda r: (r[0], r[2])).toDF(["campaign", "opens"])
+            b = spark.createDataFrame(df.rdd)
+            c = df.rdd.filter(lambda r: r.ok).map(lambda r: (r.id, r["tags"])).toDF()
+            d = df.rdd.map(lambda r: r.tags).toDF()
+            e = df.rdd.map(lambda r: (r.id, [r.a, r.b])).toDF()
+            f = df.rdd.map(lambda r: (r.id, r.tags + [1.5])).toDF()
+            g = other.map(lambda r: (r[0], r[1])).toDF()
+        """
+        found = run(code, "ArrayTypeSchemaInference.Rdd")
+        self.assertEqual([f["line"] - 2 for f in found], [6, 7, 8], "a list built from the values, or rows of unknown origin")
 
     def test_array_inference_reads_a_name_bound_in_the_function(self):
         code = """

@@ -55,7 +55,7 @@ import java.util.Set;
  *     bound is not rewritten (lit(0) names the frame "0 FOLLOWING", 0L
  *     "CURRENT ROW"; a long offset fails on a date order column).
  * <li>@InterfaceStability.X -> @X from org.apache.spark.annotation.
- * <li>new BASE64Encoder().encode(b) / encodeBuffer(b), b a byte[] variable:
+ * <li>new BASE64Encoder().encode(b) / encodeBuffer(b), b a byte[]:
  *     MIME lines of 76 characters joined by the line separator, which is what
  *     sun's encoder printed (println); encode also ended with a separator
  *     when b's length was a non-zero multiple of 57, encodeBuffer after any
@@ -63,7 +63,10 @@ import java.util.Set;
  *     17). The decoder is not rewritten: getMimeDecoder() decodes well-formed
  *     input the same, but sun's decoder returned other bytes for unpadded or
  *     malformed input (QUJDRA, " QUJD ", QUJD!!RA==) where Base64 throws or
- *     skips.
+ *     skips. The rewrite reads b three times, so a variable is rewritten in
+ *     place and any other expression (s.getBytes(UTF_8)) is passed to one
+ *     private static helper the rewrite adds to the file's top-level class,
+ *     which evaluates it once.
  * <li>JavaSparkContext/JavaStreamingContext union(first, rest) -> union of
  *     one array, first then rest in order: 2.4.8 built
  *     sc.union(first +: rest), 3.5.5's union(rdds...) is sc.union(rdds).
@@ -214,15 +217,14 @@ public class SparkCompileBreakRewrite extends Recipe {
         return e instanceof J.Literal || e instanceof J.Identifier;
     }
 
-    // `new BASE64Encoder().encode(b)` / `encodeBuffer(b)` with b a byte[] variable: b, else null.
-    static J.Identifier encodedBytes(J.MethodInvocation m) {
+    // `new BASE64Encoder().encode(b)` / `encodeBuffer(b)` with b a byte[]: b, else null.
+    static Expression encodedBytes(J.MethodInvocation m) {
         if (!("encode".equals(m.getSimpleName()) || "encodeBuffer".equals(m.getSimpleName())) ||
-                !(m.getSelect() instanceof J.NewClass) || m.getArguments().size() != 1 ||
-                !(m.getArguments().get(0) instanceof J.Identifier)) {
+                !(m.getSelect() instanceof J.NewClass) || m.getArguments().size() != 1) {
             return null;
         }
         J.NewClass n = (J.NewClass) m.getSelect();
-        J.Identifier b = (J.Identifier) m.getArguments().get(0);
+        Expression b = m.getArguments().get(0);
         boolean encoder = n.getClazz() != null && n.getArguments().stream().allMatch(a -> a instanceof J.Empty) &&
                 ("BASE64Encoder".equals(n.getClazz().toString().trim()) || "sun.misc.BASE64Encoder".equals(n.getClazz().toString().trim()));
         boolean bytes = b.getType() instanceof JavaType.Array &&
@@ -407,6 +409,8 @@ public class SparkCompileBreakRewrite extends Recipe {
         }
         return new JavaVisitor<ExecutionContext>() {
             private boolean importGoes;
+            // The Base64 helpers the rewritten calls in this file need, by method name.
+            private final Set<String> helpers = new LinkedHashSet<>();
 
             @Override
             public J visitCompilationUnit(J.CompilationUnit cu, ExecutionContext ctx) {
@@ -423,6 +427,28 @@ public class SparkCompileBreakRewrite extends Recipe {
                     c = c.withImports(kept);
                 }
                 return c;
+            }
+
+            @Override
+            public J visitClassDeclaration(J.ClassDeclaration classDecl, ExecutionContext ctx) {
+                J c = super.visitClassDeclaration(classDecl, ctx);
+                boolean topLevel = getCursor().getParentTreeCursor().getValue() instanceof J.CompilationUnit;
+                if (!topLevel || helpers.isEmpty() || !(c instanceof J.ClassDeclaration)) {
+                    return c;
+                }
+                J.ClassDeclaration cd = (J.ClassDeclaration) c;
+                for (String helper : helpers) {
+                    boolean declared = cd.getBody().getStatements().stream().anyMatch(st ->
+                            st instanceof J.MethodDeclaration && helper.equals(((J.MethodDeclaration) st).getSimpleName()));
+                    if (!declared) {
+                        String call = helper.equals(base64Helper("encode")) ? "encode" : "encodeBuffer";
+                        cd = JavaTemplate.apply("private static String " + helper + "(byte[] bytes) {\n" +
+                                        "    return " + base64Encoding("bytes", call) + ";\n}",
+                                new Cursor(getCursor().getParentOrThrow(), cd), cd.getBody().getCoordinates().lastStatement());
+                    }
+                }
+                helpers.clear();
+                return cd;
             }
 
             @Override
@@ -489,14 +515,15 @@ public class SparkCompileBreakRewrite extends Recipe {
                     case "FlatMapValuesIterable":
                         return m.withArguments(Collections.singletonList(iterators((J.Lambda) args.get(0))));
                     case "SunMiscBase64": {
-                        String b = encodedBytes(method).getSimpleName();
-                        String trailing = "encode".equals(method.getSimpleName())
-                                ? b + ".length > 0 && " + b + ".length % 57 == 0"
-                                : b + ".length > 0";
                         maybeAddImport("java.util.Base64", null, false);
-                        return JavaTemplate.apply(inContext("Base64.getMimeEncoder(76, System.lineSeparator().getBytes())" +
-                                        ".encodeToString(" + b + ") + (" + trailing + " ? System.lineSeparator() : \"\")", getCursor()),
-                                getCursor(), m.getCoordinates().replace());
+                        if (!(encodedBytes(method) instanceof J.Identifier)) {
+                            String helper = base64Helper(method.getSimpleName());
+                            helpers.add(helper);
+                            return JavaTemplate.apply(helper + "(#{any(byte[])})", getCursor(), m.getCoordinates().replace(),
+                                    args.get(0));
+                        }
+                        return JavaTemplate.apply(inContext(base64Encoding(((J.Identifier) encodedBytes(method)).getSimpleName(),
+                                method.getSimpleName()), getCursor()), getCursor(), m.getCoordinates().replace());
                     }
                     default: {
                         String to = renamed(sub, method);
@@ -507,6 +534,18 @@ public class SparkCompileBreakRewrite extends Recipe {
                 }
             }
         };
+    }
+
+    /** What sun's encoder printed for {@code b}, a byte[] variable (see the class comment). */
+    private static String base64Encoding(String b, String call) {
+        String trailing = "encode".equals(call) ? b + ".length > 0 && " + b + ".length % 57 == 0" : b + ".length > 0";
+        return "Base64.getMimeEncoder(76, System.lineSeparator().getBytes()).encodeToString(" + b + ") + (" +
+                trailing + " ? System.lineSeparator() : \"\")";
+    }
+
+    /** The helper's name for encode / encodeBuffer. */
+    private static String base64Helper(String call) {
+        return "encode".equals(call) ? "sunBase64Encode" : "sunBase64EncodeBuffer";
     }
 
     // The lambda with `.iterator()` on what it returns (as `returned` finds it).
