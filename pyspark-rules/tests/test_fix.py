@@ -792,3 +792,78 @@ class StarImportShadowsTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PythonStdlibRemovedTest(unittest.TestCase):
+    """Standard-library names Python 3.6/3.7 had and 3.8-3.11 do not (the
+    2026-10-16 user trial: `from collections import Iterable` failed at import
+    on Python 3.10). Each rewrite is the same object on every Python 3 Spark
+    3.5.5 supports."""
+    rule = "PythonStdlibRemoved"
+
+    @staticmethod
+    def run_fix(code: str, rules: set | None = None) -> tuple[str, list[dict]]:
+        module = cst.parse_module(textwrap.dedent(code))
+        out, _, errors = fix(module, rules or {PythonStdlibRemovedTest.rule})
+        assert not errors, errors
+        compile(out, "<rewritten>", "exec")
+        found, errors = detect(module, {PythonStdlibRemovedTest.rule})
+        assert not errors, errors
+        return out, found
+
+    def test_exact_replacements_are_rewritten(self):
+        out, found = self.run_fix("""
+            import base64
+            import collections as c
+            import xml.etree.cElementTree as ET
+            from collections import Iterable, OrderedDict
+            from collections import (Mapping,
+                                     Sequence)
+            from base64 import encodestring
+            from xml.etree import cElementTree
+            ok = isinstance(x, c.Mapping) and isinstance(x, Iterable)
+            raw = base64.decodestring(encodestring(b"a"))
+        """)
+        self.assertIn("import xml.etree.ElementTree as ET", out)
+        self.assertIn("from collections import OrderedDict\nfrom collections.abc import Iterable\n", out)
+        self.assertIn("from collections.abc import Mapping, Sequence\n", out)
+        self.assertIn("from base64 import encodebytes as encodestring", out)
+        self.assertIn("from xml.etree import ElementTree as cElementTree", out)
+        self.assertIn("isinstance(x, c.abc.Mapping)", out)
+        self.assertIn("import collections.abc\n", out)
+        self.assertIn("base64.decodebytes(encodestring", out)
+        self.assertEqual([(f["line"], f["tier"]) for f in found], [(4, 1), (5, 1), (6, 1), (8, 1), (9, 1), (10, 1), (11, 1)])
+
+    def test_replacements_that_behave_differently_are_reported(self):
+        out, found = self.run_fix("""
+            import time, cgi
+            from fractions import gcd
+            from inspect import getargspec
+            t = time.clock()
+            s = cgi.escape(x)
+        """)
+        self.assertIn("time.clock()", out, "reported, not rewritten")
+        self.assertEqual([(f["line"], f.get("tier"), f["confidence"]) for f in found],
+                         [(3, None, "medium"), (4, None, "medium"), (5, None, "high"), (6, None, "high")])
+        self.assertIn("fails on every Python Spark 3.5.5 supports", found[2]["message"])
+        self.assertIn("fails if the job runs on 3.11 or later", found[1]["message"])
+
+    def test_current_names_are_left(self):
+        out, found = self.run_fix("""
+            import collections.abc
+            from collections import OrderedDict, abc
+            from collections.abc import Iterable
+            import xml.etree.ElementTree as ET
+            ok = isinstance(x, collections.abc.Mapping) and isinstance(x, abc.Sized)
+            n = collections.Counter()
+        """)
+        self.assertEqual(found, [])
+
+    def test_an_import_the_star_import_rule_repeats_is_rewritten_too(self):
+        out, _ = self.run_fix("""
+            from collections import Iterable
+            from pyspark.sql.functions import *
+            ok = isinstance(x, Iterable)
+        """, {"StarImportShadowsFilter", self.rule})
+        self.assertNotIn("from collections import Iterable", out)
+        self.assertEqual(out.count("from collections.abc import Iterable"), 2)
