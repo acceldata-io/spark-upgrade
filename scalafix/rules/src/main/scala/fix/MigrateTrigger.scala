@@ -48,6 +48,12 @@ import scala.meta._
  * argument. Narrowed to `Term.Name` specifically (as `IsRunningLocallyWarn`/
  * `ShuffleWriteMetricsRenameDetect` already do) so only the identifier is
  * replaced and the call's own arguments survive untouched.
+ *
+ * A fourth, found in the 2026-10-16 user trial: the explicit
+ * `import org.apache.spark.sql.streaming.ProcessingTime` (or a renaming
+ * import of it) was left behind, and it does not compile on 3.x, so the file
+ * failed right after the rewrite. Every call site is now fully qualified, so
+ * that importee is removed.
  */
 class MigrateTrigger extends SemanticRule("MigrateTrigger") {
   override val description =
@@ -60,6 +66,8 @@ class MigrateTrigger extends SemanticRule("MigrateTrigger") {
   override def fix(implicit doc: SemanticDocument): Patch = {
     def matchOnTree(e: Tree): Patch = {
       e match {
+        case i @ Importee.Name(n) if triggerMatcher.matches(n) => Patch.removeImportee(i)
+        case i @ Importee.Rename(n, _) if triggerMatcher.matches(n) => Patch.removeImportee(i)
         case t: Term.Name if triggerMatcher.matches(t) =>
           RuleFinding.report(
             RuleChange(
