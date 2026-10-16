@@ -139,7 +139,7 @@ class SparkCompileBreakDetectTest implements RewriteTest {
     @Test
     void removedTypesByName() {
         // sun.misc does not exist on this JDK 17 test classpath, as on the CLI's.
-        // The encoder call has no byte[] variable and InterfaceStability is used
+        // The encoder is kept in a field and InterfaceStability is used
         // outside an annotation, so their imports stay and are reported.
         rewriteRun(spec -> spec.recipes(recipe("SunMiscBase64"), recipe("InterfaceStability"), recipe("AccumulableApi"))
                         .typeValidationOptions(TypeValidation.none()),
@@ -152,7 +152,8 @@ class SparkCompileBreakDetectTest implements RewriteTest {
                         @InterfaceStability.Evolving
                         class A {
                             Object s = InterfaceStability.class;
-                            String b(byte[] x) { return new BASE64Encoder().encode(x.clone()); }
+                            BASE64Encoder enc = new BASE64Encoder();
+                            String b(byte[] x) { return enc.encode(x); }
                         }
                         """,
                         """
@@ -163,7 +164,8 @@ class SparkCompileBreakDetectTest implements RewriteTest {
                         @InterfaceStability.Evolving
                         class A {
                             Object s = InterfaceStability.class;
-                            String b(byte[] x) { return new BASE64Encoder().encode(x.clone()); }
+                            BASE64Encoder enc = new BASE64Encoder();
+                            String b(byte[] x) { return enc.encode(x); }
                         }
                         """.formatted(mark("SunMiscBase64"), mark("SunMiscBase64"), mark("AccumulableApi"),
                                 mark("InterfaceStability"))));

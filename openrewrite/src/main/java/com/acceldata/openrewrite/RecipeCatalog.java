@@ -5,6 +5,7 @@ import org.openrewrite.config.Environment;
 
 import com.acceldata.openrewrite.spark.SparkAccumulableInfoConstructionDetect;
 import com.acceldata.openrewrite.spark.SparkAccumulatorV1Detect;
+import com.acceldata.openrewrite.spark.SparkAccumulatorV1Rewrite;
 import com.acceldata.openrewrite.spark.SparkAddMonthsRewrite;
 import com.acceldata.openrewrite.spark.SparkAddMonthsUsageWarn;
 import com.acceldata.openrewrite.spark.SparkAnalysisExceptionPlanUsageDetect;
@@ -164,6 +165,9 @@ public final class RecipeCatalog {
         byId.put(SparkPathOptionConflictRewrite.class.getName(), new SparkPathOptionConflictRewrite());
         byId.put(SparkOneHotEncoderEstimatorRename.class.getName(), new SparkOneHotEncoderEstimatorRename());
         byId.put(SparkCalendarIntervalConstructorRewrite.class.getName(), new SparkCalendarIntervalConstructorRewrite());
+        // 2026-10-16 (the user trial): the v1 accumulator in its common shape;
+        // SparkAccumulatorV1Detect reports the rest.
+        byId.put(SparkAccumulatorV1Rewrite.class.getName(), new SparkAccumulatorV1Rewrite());
         byId.put(SparkDateTimeFormatPatternDetect.class.getName(), new SparkDateTimeFormatPatternDetect());
         byId.put(SparkMesosUsageDetect.class.getName(), new SparkMesosUsageDetect());
         byId.put(SparkLog4j1UsageDetect.class.getName(), new SparkLog4j1UsageDetect());
