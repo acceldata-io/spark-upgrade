@@ -34,9 +34,14 @@ class SelfJoinAmbiguousColumnDetect extends SemanticRule("SelfJoinAmbiguousColum
 
   private val joinMatcher = SymbolMatcher.normalized("org.apache.spark.sql.Dataset.join")
 
-  private def sameReference(a: Tree, b: Tree)(implicit doc: SemanticDocument): Boolean = {
-    val sa = a.symbol
-    sa != Symbol.None && sa == b.symbol
+  /** Both sides name the same frame. Only a plain name counts: two calls (`conv.as("v")`,
+   *  `eligible.as("t")`) share the method's symbol, not a frame (the 2026-10-19 user trial), and
+   *  an aliased side is the fix itself. */
+  private def sameReference(a: Tree, b: Tree)(implicit doc: SemanticDocument): Boolean = (a, b) match {
+    case (x: Term.Name, y: Term.Name) =>
+      val sa = x.symbol
+      sa != Symbol.None && sa == y.symbol
+    case _ => false
   }
 
   /** `df("c")`, `df.col("c")` or `df.apply("c")` on the frame `frame`: the column's name. */

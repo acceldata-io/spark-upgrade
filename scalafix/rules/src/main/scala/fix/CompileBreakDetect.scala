@@ -97,6 +97,55 @@ class CompileBreakDetect extends SemanticRule("CompileBreakDetect") {
     case _ => false
   }
 
+  /** A typed lambda (`(batch: DataFrame, id: Long) => ...`) whose body ends in a call returning a value: the
+   *  2026-10-19 user trial's `batch.unpersist()`. An untyped one is `ForeachBatchLambda`'s. */
+  private def endsInValue(n: Term.Name)(implicit doc: SemanticDocument): Boolean =
+    typedFunction(n).flatMap(f => lastStat(f.body)).exists {
+      case t @ (_: Term.Apply | _: Term.Select | _: Term.Name) => returnsValue(t)
+      case _ => false
+    }
+
+  private def typedFunction(n: Term.Name): Option[Term.Function] = soleArg(n) match {
+    case Some(f: Term.Function) if f.params.nonEmpty && f.params.forall(_.decltpe.isDefined) => Some(f)
+    case Some(Term.Block(List(f: Term.Function))) if f.params.nonEmpty && f.params.forall(_.decltpe.isDefined) => Some(f)
+    case _ => None
+  }
+
+  private def lastStat(body: Term): Option[Stat] = body match {
+    case Term.Block(stats) => stats.lastOption
+    case t => Some(t)
+  }
+
+  /** The method a call ends in returns something other than Unit. */
+  private def returnsValue(t: Tree)(implicit doc: SemanticDocument): Boolean = {
+    val method = t match {
+      case Term.Apply(fun, _) => fun
+      case other => other
+    }
+    val name = method match {
+      case Term.Select(_, n) => n
+      case n: Term.Name => n
+      case other => other
+    }
+    // `this.type` (Dataset.unpersist) is a SingleType, not a TypeRef: any return type but Unit, Nothing or none.
+    name.symbol.info.exists(_.signature match {
+      case MethodSignature(_, _, TypeRef(_, sym, _)) => sym.value != "scala/Unit#" && sym.value != "scala/Nothing#"
+      case MethodSignature(_, _, NoType) => false
+      case MethodSignature(_, _, _) => true
+      case _ => false
+    })
+  }
+
+  private def appendUnit: Rewrite = n => ctx => {
+    typedFunction(n).flatMap(f => lastStat(f.body).map(f -> _)) match {
+      case Some((f, last)) =>
+        val indent = " " * last.pos.startColumn
+        if (f.body.is[Term.Block]) Right(Patch.addRight(last, s"\n$indent()"))
+        else Right(Patch.addLeft(last, "{ ") + Patch.addRight(last, "; () }"))
+      case None => Left("the lambda's body could not be read")
+    }
+  }
+
   // The single argument of `recv.<n>(arg)`.
   private def soleArg(n: Term.Name): Option[Term] = n.parent match {
     case Some(sel @ Term.Select(_, name)) if name eq n =>
@@ -307,6 +356,14 @@ class CompileBreakDetect extends SemanticRule("CompileBreakDetect") {
       (n, doc) => calledWithUntypedFunction(n), Some(typeLambda),
       "Wrote the parameters' types, (DataFrame, Long) as Scala 2.11 inferred them, so Scala 2.12 calls the same " +
         "overload (process(_, _) became process _)."),
+    Break("ForeachBatchValueBody", Seq("org.apache.spark.sql.streaming.DataStreamWriter.foreachBatch"),
+      "Scala 2.12 cannot choose between DataStreamWriter.foreachBatch's Scala-function and Java VoidFunction2 " +
+        "overloads for a lambda whose body ends in a value (batch.unpersist() returns the Dataset), even with typed " +
+        "parameters: \"ambiguous reference to overloaded definition\".",
+      "End the lambda's body with () so it returns Unit.",
+      (n, doc) => endsInValue(n)(doc), Some(appendUnit),
+      "Ended the body with (): the lambda returned Unit on Scala 2.11 too (foreachBatch discards the value), so " +
+        "Scala 2.12 calls the same overload."),
     Break("RowEncoderApply", Seq("org.apache.spark.sql.catalyst.encoders.RowEncoder"),
       "RowEncoder(schema) / RowEncoder.apply(schema) was removed in Spark 3.5; the object only has encoderFor now.",
       "Use ExpressionEncoder(schema) (org.apache.spark.sql.catalyst.encoders.ExpressionEncoder, the same " +

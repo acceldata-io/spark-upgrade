@@ -20,4 +20,14 @@ object CompileBreakLambdas {
   def e(ds: Dataset[Reading]): Unit = ds.foreachPartition(count _)
   def f(df: DataFrame): Unit = df.writeStream.foreachBatch((b: DataFrame, id: Long) => println(id)).start()
   def g(df: DataFrame): Unit = df.writeStream.foreachBatch(process _).start()
+  // Typed, but the body ends in a value (the 2026-10-19 user trial's batch.unpersist()): still ambiguous on 2.12.
+  def h(df: DataFrame): Unit = df.writeStream.foreachBatch { (batch: DataFrame, id: Long) =>
+    batch.persist()
+    batch.unpersist()
+    ()
+  }.start()
+  def i(df: DataFrame): Unit = df.writeStream.foreachBatch((batch: DataFrame, id: Long) => { batch.unpersist(); () }).start()
+  def j(df: DataFrame): Unit = df.writeStream.foreachBatch { (batch: DataFrame, id: Long) =>
+    println(id)
+  }.start()
 }

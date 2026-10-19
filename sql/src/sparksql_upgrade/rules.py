@@ -775,6 +775,22 @@ def date_string_comparison_changes(literal: str, operator: str) -> bool:
     return operator in (">", "<=", "BETWEEN_HI")
 
 
+# What a template's run-time part is linted as (spark-migrate-cli's SqlLiteralLinter.Param).
+PARAM_TEXT = "__param__"
+# A column whose name says it holds a date or a time: what a run-time string is compared with.
+_DATE_COLUMN = re.compile(r"(?i)(date|time|(^|_)(dt|ts|day)$)")
+
+
+def _compared_column(code, i: int, operator: str) -> Optional[str]:
+    """The name of the column the literal at ``code[i]`` is compared with, if it is one."""
+    j = {"BETWEEN_LO": i - 2, "BETWEEN_HI": i - 4}.get(operator)
+    if j is None:
+        j = i - 2 if i > 0 and code[i - 1].is_type("comparison_operator") else i + 2
+    if not 0 <= j < len(code) or not code[j].is_type("column_reference"):
+        return None
+    return code[j].raw.split(".")[-1].strip("`")
+
+
 class Rule_DATESTRCOMPARE_L013(BaseRule):
     """Spark 3.0 compares a date or timestamp with a string as a date or timestamp.
 
@@ -821,6 +837,22 @@ class Rule_DATESTRCOMPARE_L013(BaseRule):
         else:
             return None
         literal = context.segment.raw[1:-1]
+        if literal == PARAM_TEXT:
+            # A value only known at run time ('{close_end}' in a template): the 2026-10-19 user trial's
+            # `posting_date <= '{close_end}'` got '2024-2-29', and February's balance took in March on 2.4.
+            other = _compared_column(code, i, operator)
+            if other is None or not _DATE_COLUMN.search(other):
+                return None
+            return LintResult(
+                anchor=context.segment,
+                description=f"{other} is compared with a string known only at run time. If {other} is a date or "
+                "timestamp, Spark 3.x casts the string to it, where 2.4 compared strings (except a timestamp under = "
+                "and <=>): a value that is not a zero-padded yyyy-MM-dd ('2024-2-29'), or a date compared with a "
+                "timestamp column, gives other rows. "
+                "spark.sql.legacy.typeCoercion.datetimeToString.enabled=true restores 2.4 and is injected; its cost is "
+                "that a date partition column compared with a string is no longer pruned. To drop it, pass a typed "
+                "value (DATE '...', to_date(...)).",
+            )
         if not date_string_comparison_changes(literal, operator):
             return None
         return LintResult(
