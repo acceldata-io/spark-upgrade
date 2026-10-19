@@ -114,4 +114,50 @@ class SparkSqlLiteralExtractTest implements RewriteTest {
                 )
         );
     }
+    @Test
+    void marksEachStatementOfAListLoopedIntoSql() {
+        // The 2026-10-19 user trial's shape: DDL kept in a list and run in a loop.
+        rewriteRun(
+                java(
+                        """
+                        import java.util.Arrays;
+                        import java.util.List;
+                        import org.apache.spark.sql.SparkSession;
+
+                        class Warehouse {
+                            static final List<String> DDL = Arrays.asList(
+                                    "CREATE TABLE a (c CHAR(2))",
+                                    "DROP TABLE b");
+
+                            void init(SparkSession spark, List<String> built) {
+                                for (String q : DDL) {
+                                    spark.sql(q);
+                                }
+                                for (String q : new String[]{"SELECT 2"}) spark.sql(q);
+                                for (String q : built) spark.sql(q);
+                            }
+                        }
+                        """,
+                        """
+                        import java.util.Arrays;
+                        import java.util.List;
+                        import org.apache.spark.sql.SparkSession;
+
+                        class Warehouse {
+                            static final List<String> DDL = Arrays.asList(
+                                    /*~~(CREATE TABLE a (c CHAR(2)))~~>*/"CREATE TABLE a (c CHAR(2))",
+                                    /*~~(DROP TABLE b)~~>*/"DROP TABLE b");
+
+                            void init(SparkSession spark, List<String> built) {
+                                for (String q : DDL) {
+                                    spark.sql(q);
+                                }
+                                for (String q : new String[]{/*~~(SELECT 2)~~>*/"SELECT 2"}) spark.sql(q);
+                                for (String q : built) spark.sql(/*~~(@@dynamic@@)~~>*/q);
+                            }
+                        }
+                        """
+                )
+        );
+    }
 }

@@ -56,6 +56,7 @@ from spark_upgrade_rules.pandas_on_spark_rules import (
 )
 from spark_upgrade_rules.pyspark_api_rules import MlSharedParamSetters, RemovedPySparkApi, RowKwargsFieldOrder
 from spark_upgrade_rules.pyspark_guide_rules import ArrayTypeSchemaInference, NamedtupleCloudpickle
+from spark_upgrade_rules.python_library_rules import PythonLibraryRemoved
 from spark_upgrade_rules.python_stdlib_rules import PythonStdlibRemoved
 from spark_upgrade_rules.sql import extract_sql
 from spark_upgrade_rules.star_import_rules import StarImportShadowsFilter
@@ -101,6 +102,8 @@ DETECTORS = [
     # Standard-library names the job's old Python had and 3.8-3.11 do not; after
     # the star-import rule, so an import it repeats is rewritten too.
     PythonStdlibRemoved,
+    # numpy, pandas and PyYAML APIs the releases pip installs on Python 3.8-3.11 removed.
+    PythonLibraryRemoved,
     # Koalas -> pandas API on Spark, then the two changes the port reaches; the
     # port runs first, so codegen's later rules see pyspark.pandas.
     KoalasToPandasOnSpark,

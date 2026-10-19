@@ -62,3 +62,24 @@ partition_spec_and_non_dates_ok:
       dialect: sparksql
   pass_str: |
     INSERT INTO t PARTITION (dt='2020-1-1') SELECT * FROM s WHERE month = '2020-01' AND code > '2020-01-01x'
+
+run_time_value_against_a_date_column_flagged:
+  configs:
+    core:
+      dialect: sparksql
+  fail_str: |
+    SELECT * FROM j WHERE j.posting_date >= '__param__' AND j.posting_date <= '__param__'
+
+run_time_value_between_on_a_dt_column_flagged:
+  configs:
+    core:
+      dialect: sparksql
+  fail_str: |
+    SELECT * FROM t WHERE load_dt BETWEEN '__param__' AND '__param__'
+
+run_time_value_against_other_columns_passes:
+  configs:
+    core:
+      dialect: sparksql
+  pass_str: |
+    SELECT * FROM t WHERE account = '__param__' AND region > '__param__'

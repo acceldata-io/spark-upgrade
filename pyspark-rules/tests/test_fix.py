@@ -867,3 +867,63 @@ class PythonStdlibRemovedTest(unittest.TestCase):
         """, {"StarImportShadowsFilter", self.rule})
         self.assertNotIn("from collections import Iterable", out)
         self.assertEqual(out.count("from collections.abc import Iterable"), 2)
+
+
+class PythonLibraryRemovedTest(unittest.TestCase):
+    """numpy 1.24, pandas 2.0 and PyYAML 6 removals (the 2026-10-19 user trial:
+    customer-360's tests failed on np.float, Series.iteritems, DataFrame.append
+    and yaml.load once pip installed current releases on Python 3.10)."""
+    rule = "PythonLibraryRemoved"
+
+    @staticmethod
+    def run_fix(code: str) -> tuple[str, list[dict]]:
+        module = cst.parse_module(textwrap.dedent(code))
+        out, _, errors = fix(module, {PythonLibraryRemovedTest.rule})
+        assert not errors, errors
+        compile(out, "<rewritten>", "exec")
+        found, errors = detect(module, {PythonLibraryRemovedTest.rule})
+        assert not errors, errors
+        return out, found
+
+    def test_exact_replacements_are_rewritten(self):
+        out, found = self.run_fix("""
+            import numpy as np
+            import pandas as pd
+            import yaml
+            w = np.float(x) + np.int(y)
+            arr = s.astype(np.object)
+            for k, v in s.iteritems():
+                pass
+            up = s.index.is_monotonic
+            conf = yaml.load(open("c.yml"))
+            same = yaml.load(text, Loader=yaml.SafeLoader)
+            keep = np.float64(1.0)
+        """)
+        self.assertIn("w = float(x) + int(y)", out)
+        self.assertIn("s.astype(object)", out)
+        self.assertIn("s.items():", out)
+        self.assertIn("s.index.is_monotonic_increasing", out)
+        self.assertIn('yaml.load(open("c.yml"), Loader=yaml.FullLoader)', out)
+        self.assertIn("yaml.load(text, Loader=yaml.SafeLoader)", out)
+        self.assertIn("np.float64(1.0)", out)
+        self.assertEqual(sorted((f["line"], f["tier"]) for f in found), [(5, 1), (5, 1), (6, 1), (7, 1), (9, 1), (10, 1)])
+
+    def test_appends_whose_result_is_used_are_reported_in_pandas_modules(self):
+        out, found = self.run_fix("""
+            import pandas as pd
+            rows = []
+            rows.append(1)
+            df = df.append(other, ignore_index=True)
+            both = [1].append(2)
+            n = pd.np.nan
+        """)
+        self.assertIn("df = df.append(other, ignore_index=True)", out)
+        self.assertEqual(sorted((f["line"], f.get("tier")) for f in found), [(5, None), (7, None)])
+
+    def test_modules_without_pandas_keep_their_methods(self):
+        out, found = self.run_fix("""
+            x = d.iteritems()
+            y = q.append(3)
+        """)
+        self.assertIn("d.iteritems()", out)
+        self.assertEqual(found, [])

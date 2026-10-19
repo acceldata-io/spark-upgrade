@@ -17,6 +17,7 @@ import org.openrewrite.java.MethodMatcher;
 import org.openrewrite.java.tree.Expression;
 import org.openrewrite.java.tree.J;
 import org.openrewrite.java.tree.JavaType;
+import org.openrewrite.java.tree.Statement;
 import org.openrewrite.marker.SearchResult;
 
 /**
@@ -94,11 +95,18 @@ public class SparkSqlLiteralExtract extends Recipe {
             // Variables initialised in this file, and those assigned again.
             private final Map<String, Expression> initialisers = new HashMap<>();
             private final Set<String> reassigned = new HashSet<>();
+            // `for (String q : DDL) spark.sql(q);` over statements this file spells out: each statement is
+            // marked where it is written, and the loop variable's call is not dynamic (the 2026-10-19 user
+            // trial: a CHAR(2) column in a list of DDL strings was never linted).
+            private final Set<java.util.UUID> loopCalls = new HashSet<>();
+            private final Set<java.util.UUID> statements = new HashSet<>();
 
             @Override
             public J.CompilationUnit visitCompilationUnit(J.CompilationUnit cu, ExecutionContext ctx) {
                 initialisers.clear();
                 reassigned.clear();
+                loopCalls.clear();
+                statements.clear();
                 new JavaIsoVisitor<Integer>() {
                     @Override
                     public J.VariableDeclarations.NamedVariable visitVariable(J.VariableDeclarations.NamedVariable v, Integer p) {
@@ -120,7 +128,75 @@ public class SparkSqlLiteralExtract extends Recipe {
                         return super.visitAssignmentOperation(a, p);
                     }
                 }.visit(cu, 0);
+                new JavaIsoVisitor<Integer>() {
+                    @Override
+                    public J.ForEachLoop visitForEachLoop(J.ForEachLoop loop, Integer p) {
+                        Statement declared = loop.getControl().getVariable();
+                        J.VariableDeclarations.NamedVariable v = declared instanceof J.VariableDeclarations
+                                ? ((J.VariableDeclarations) declared).getVariables().get(0) : null;
+                        List<Expression> elements = v == null || v.getVariableType() == null ? null : elements(loop.getControl().getIterable(), 0);
+                        List<java.util.UUID> calls = elements == null ? Collections.emptyList()
+                                : sqlCallsOn(loop.getBody(), v.getSimpleName());
+                        if (!calls.isEmpty()) {
+                            loopCalls.addAll(calls);
+                            for (Expression e : elements) {
+                                if (e instanceof J.Literal && ((J.Literal) e).getValue() instanceof String) {
+                                    statements.add(e.getId());
+                                }
+                            }
+                        }
+                        return super.visitForEachLoop(loop, p);
+                    }
+                }.visit(cu, 0);
                 return super.visitCompilationUnit(cu, ctx);
+            }
+
+            /** The elements of an array or list this file spells out: {@code {..}}, {@code new String[]{..}},
+             * {@code Arrays.asList(..)}, {@code List.of(..)}, or a variable initialised to one. */
+            private List<Expression> elements(Expression e, int depth) {
+                if (e instanceof J.NewArray) {
+                    return ((J.NewArray) e).getInitializer();
+                }
+                if (e instanceof J.MethodInvocation) {
+                    J.MethodInvocation m = (J.MethodInvocation) e;
+                    String name = m.getSimpleName();
+                    String owner = m.getSelect() instanceof J.Identifier ? ((J.Identifier) m.getSelect()).getSimpleName()
+                            : m.getSelect() instanceof J.FieldAccess ? ((J.FieldAccess) m.getSelect()).getSimpleName() : "";
+                    boolean factory = "asList".equals(name) && "Arrays".equals(owner)
+                            || "of".equals(name) && ("List".equals(owner) || "Set".equals(owner));
+                    return factory ? m.getArguments() : null;
+                }
+                if (e instanceof J.Identifier && depth < MAX_DEPTH) {
+                    JavaType.Variable v = ((J.Identifier) e).getFieldType();
+                    if (v != null && !reassigned.contains(key(v)) && initialisers.containsKey(key(v))) {
+                        return elements(initialisers.get(key(v)), depth + 1);
+                    }
+                }
+                return null;
+            }
+
+            /** The {@code sql(...)} calls in {@code body} passed the loop variable {@code variable}. */
+            private List<java.util.UUID> sqlCallsOn(Statement body, String variable) {
+                List<java.util.UUID> found = new java.util.ArrayList<>();
+                new JavaIsoVisitor<Integer>() {
+                    @Override
+                    public J.MethodInvocation visitMethodInvocation(J.MethodInvocation m, Integer p) {
+                        if ((SPARK_SESSION_SQL.matches(m) || SQL_CONTEXT_SQL.matches(m)) && m.getArguments().size() == 1
+                                && m.getArguments().get(0) instanceof J.Identifier) {
+                            if (((J.Identifier) m.getArguments().get(0)).getSimpleName().equals(variable)) {
+                                found.add(m.getId());
+                            }
+                        }
+                        return super.visitMethodInvocation(m, p);
+                    }
+                }.visit(body, 0);
+                return found;
+            }
+
+            @Override
+            public J.Literal visitLiteral(J.Literal literal, ExecutionContext ctx) {
+                J.Literal l = super.visitLiteral(literal, ctx);
+                return statements.contains(l.getId()) ? SearchResult.found(l, (String) l.getValue()) : l;
             }
 
             private void markAssigned(Expression target) {
@@ -138,6 +214,9 @@ public class SparkSqlLiteralExtract extends Recipe {
                     return m;
                 }
                 Expression arg = m.getArguments().get(0);
+                if (loopCalls.contains(m.getId())) {
+                    return m; // its statements are marked where they are written
+                }
                 String description;
                 if (arg instanceof J.Literal && ((J.Literal) arg).getValue() instanceof String) {
                     description = (String) ((J.Literal) arg).getValue();

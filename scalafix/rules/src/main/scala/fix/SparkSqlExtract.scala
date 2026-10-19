@@ -36,15 +36,38 @@ class SparkSqlExtract extends SemanticRule("SparkSqlExtract") {
       case Defn.Val(_, List(Pat.Var(name)), _, rhs) => name.symbol -> rhs
     }.toMap
 
-    doc.tree.collect {
-      case Term.Apply(sqlMatcher(_), List(arg)) =>
-        val (kind, text) = SparkSqlExtract.read(arg, name => vals.get(name.symbol), 0) match {
-          case Some(sql) if sql.text.replace(SparkSqlExtract.Param, "").trim.nonEmpty =>
-            (if (sql.holes == 0) "literal" else s"template ${sql.holes}", sql.text)
-          case _ => ("dynamic", "")
-        }
-        RuleFinding.report(RuleChange("SparkSqlExtract", kind, text, arg))
-    }.asPatch
+    def report(arg: Term): Patch = {
+      val (kind, text) = SparkSqlExtract.read(arg, name => vals.get(name.symbol), 0) match {
+        case Some(sql) if sql.text.replace(SparkSqlExtract.Param, "").trim.nonEmpty =>
+          (if (sql.holes == 0) "literal" else s"template ${sql.holes}", sql.text)
+        case _ => ("dynamic", "")
+      }
+      RuleFinding.report(RuleChange("SparkSqlExtract", kind, text, arg))
+    }
+
+    // `sql` passed as a function over a collection: `ddl.foreach(spark.sql)`, `.map(spark.sql(_))`,
+    // `.foreach(q => spark.sql(q))`. Each statement of a collection this file spells out is read where it is
+    // written (the 2026-10-19 user trial: a CHAR(2) column in a `Seq` of DDL strings was never linted).
+    def sqlFunction(fn: Term): Option[Tree] = fn match {
+      case s @ Term.Select(_, Term.Name("sql")) if sqlMatcher.matches(s) => Some(s)
+      case a @ Term.Apply(sqlMatcher(_), List(Term.Placeholder())) => Some(a)
+      case Term.AnonymousFunction(a @ Term.Apply(sqlMatcher(_), List(Term.Placeholder()))) => Some(a)
+      case Term.Function(List(p), a @ Term.Apply(sqlMatcher(_), List(n: Term.Name))) if n.value == p.name.value => Some(a)
+      case Term.Block(List(f: Term.Function)) => sqlFunction(f)
+      case _ => None
+    }
+    val overCollections: Seq[(Term, Tree, Option[Seq[Term]])] = doc.tree.collect {
+      case Term.Apply(Term.Select(coll, Term.Name("foreach" | "map" | "flatMap")), List(fn)) if sqlFunction(fn).isDefined =>
+        (fn, sqlFunction(fn).get, SparkSqlExtract.elements(coll, name => vals.get(name.symbol), 0))
+    }
+    val inner = overCollections.map(_._2.pos).toSet
+
+    (doc.tree.collect {
+      case a @ Term.Apply(sqlMatcher(_), List(arg)) if !inner.contains(a.pos) => report(arg)
+    } ++ overCollections.map {
+      case (_, _, Some(statements)) => statements.map(report).asPatch
+      case (fn, _, None) => RuleFinding.report(RuleChange("SparkSqlExtract", "dynamic", "", fn))
+    }).asPatch
   }
 }
 
@@ -103,6 +126,16 @@ object SparkSqlExtract {
         Sql(text, holes)
       }
     case name: Term.Name if depth < maxDepth => valOf(name).flatMap(read(_, valOf, depth + 1))
+    case _ => None
+  }
+
+  /** The statements of a collection spelled out in this file: `Seq(...)`, `List(...)`, `Array(...)`,
+   * `Vector(...)`, a `val` holding one, or two joined with `++`. None when any part is not. */
+  def elements(t: Term, valOf: Term.Name => Option[Term], depth: Int): Option[Seq[Term]] = t match {
+    case Term.Apply(Term.Name("Seq" | "List" | "Array" | "Vector" | "IndexedSeq"), args) => Some(args)
+    case Term.ApplyInfix(l, Term.Name("++"), _, List(r)) =>
+      for (a <- elements(l, valOf, depth); b <- elements(r, valOf, depth)) yield a ++ b
+    case name: Term.Name if depth < maxDepth => valOf(name).flatMap(elements(_, valOf, depth + 1))
     case _ => None
   }
 

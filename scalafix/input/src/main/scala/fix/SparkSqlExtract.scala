@@ -65,3 +65,31 @@ Change:
 */
   }
 }
+
+object SparkSqlExtractCollections {
+  val Ddl = Seq(
+    "CREATE TABLE a (c CHAR(2))", /* assert: SparkSqlExtract
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+literal
+Change: CREATE TABLE a (c CHAR(2))
+*/
+    """DROP TABLE b""") /* assert: SparkSqlExtract
+    ^^^^^^^^^^^^^^^^^^
+literal
+Change: DROP TABLE b
+*/
+
+  def run(spark: SparkSession, built: Seq[String]): Unit = {
+    Ddl.foreach(spark.sql)
+    List("SELECT 2").map(q => spark.sql(q)) /* assert: SparkSqlExtract
+         ^^^^^^^^^^
+literal
+Change: SELECT 2
+*/
+    built.foreach(spark.sql(_)) /* assert: SparkSqlExtract
+                  ^^^^^^^^^^^^
+dynamic
+Change:
+*/
+  }
+}
