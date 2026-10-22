@@ -869,6 +869,46 @@ class PythonStdlibRemovedTest(unittest.TestCase):
         self.assertEqual(out.count("from collections.abc import Iterable"), 2)
 
 
+class PythonStdlibCallsTest(unittest.TestCase):
+    """The 2026-10-20 user trial's iot job: `json.loads(s, encoding=...)` failed
+    its tests and `Thread.isAlive()` crashed the job at its end, on Python 3.10."""
+    rule = "PythonStdlibRemoved"
+
+    def test_json_encoding_is_dropped(self):
+        out, found = PythonStdlibRemovedTest.run_fix("""
+            import json
+            from json import load
+            a = json.loads(s, encoding="utf-8")
+            b = load(fp, encoding="latin-1", object_hook=hook)
+            c = json.loads(s)
+        """)
+        self.assertIn("a = json.loads(s)\n", out)
+        self.assertIn('b = load(fp, object_hook=hook)', out)
+        self.assertEqual([(f["line"], f["tier"]) for f in found], [(4, 1), (5, 1)])
+        self.assertIn("ignored since Python 3.1", found[0]["message"])
+
+    def test_is_alive_is_rewritten_where_the_file_imports_threading(self):
+        out, found = PythonStdlibRemovedTest.run_fix("""
+            import threading
+            t = threading.Thread(target=f)
+            while t.isAlive():
+                pass
+        """)
+        self.assertIn("while t.is_alive():", out)
+        self.assertEqual([(f["line"], f["tier"]) for f in found], [(4, 1)])
+
+    def test_is_alive_without_a_threading_import_is_reported_not_rewritten(self):
+        # `# threading` in a comment is not an import.
+        out, found = PythonStdlibRemovedTest.run_fix("""
+            # threading helpers
+            if worker.isAlive():
+                pass
+            ok = worker.isAlive(timeout)
+        """)
+        self.assertIn("worker.isAlive()", out)
+        self.assertEqual([(f["line"], f.get("tier"), f["confidence"]) for f in found], [(3, None, "medium")])
+
+
 class PythonLibraryRemovedTest(unittest.TestCase):
     """numpy 1.24, pandas 2.0 and PyYAML 6 removals (the 2026-10-19 user trial:
     customer-360's tests failed on np.float, Series.iteritems, DataFrame.append
