@@ -4,6 +4,29 @@ import fix.support.{RuleChange, RuleFinding}
 import scalafix.v1._
 import scala.meta._
 
+/** The suite styles and matchers ScalaTest 3.1 moved out of `org.scalatest`
+ * (deprecated there in 3.1, removed in 3.2): name -> new path under
+ * `org.scalatest`. spark-testing-base's Spark 3.5 release is built on
+ * ScalaTest 3.2, so a suite using it needs every style moved, not only
+ * FunSuite. `ScalaTestExtendsFix` renames the supertypes to match. */
+object ScalaTestStyles {
+  private val styles = Seq("FunSuite", "FlatSpec", "WordSpec", "FreeSpec", "FunSpec", "PropSpec", "FeatureSpec")
+
+  val moved: Map[String, String] = styles.flatMap { style =>
+    val pkg = style.toLowerCase
+    Seq(style -> s"$pkg.Any$style", s"${style}Like" -> s"$pkg.Any${style}Like",
+      s"Async$style" -> s"$pkg.Async$style", s"Async${style}Like" -> s"$pkg.Async${style}Like")
+  }.toMap + ("Matchers" -> "matchers.should.Matchers")
+
+  /** A supertype's new simple name: `FlatSpec` -> `AnyFlatSpec`; the Async styles keep theirs. */
+  val renamed: Map[String, String] = moved.collect {
+    case (from, to) if !from.startsWith("Async") && from != "Matchers" => from -> to.split('.').last
+  }
+
+  def importer(path: String): Importer =
+    dialects.Scala212(s"import $path").parse[Stat].get.asInstanceOf[Import].importers.head
+}
+
 /**
  * Handle the import changes from ScalaTest 3.1
  * (see https://www.scalatest.org/release_notes/3.1.0). The extends-clause
@@ -51,16 +74,11 @@ class ScalaTestImportChange
       case Import(List(Importer(owner, importees))) =>
         val ownerText = owner.toString()
         importees.collect {
-          case i @ Importee.Name(Name("FunSuite")) if ownerText == "org.scalatest" =>
-            rewrite(i, importer"org.scalatest.funsuite.AnyFunSuite", "org.scalatest.funsuite.AnyFunSuite")
-          case i @ Importee.Name(Name("FunSuiteLike")) if ownerText == "org.scalatest" =>
-            rewrite(i, importer"org.scalatest.funsuite.AnyFunSuiteLike", "org.scalatest.funsuite.AnyFunSuiteLike")
-          case i @ Importee.Name(Name("AsyncFunSuite")) if ownerText == "org.scalatest" =>
-            rewrite(i, importer"org.scalatest.funsuite.AsyncFunSuite", "org.scalatest.funsuite.AsyncFunSuite")
+          case i @ Importee.Name(Name(name)) if ownerText == "org.scalatest" && ScalaTestStyles.moved.contains(name) =>
+            val to = s"org.scalatest.${ScalaTestStyles.moved(name)}"
+            rewrite(i, ScalaTestStyles.importer(to), to)
           case i @ Importee.Name(Name("FunSuite")) if ownerText == "org.scalatest.fixture" =>
             rewrite(i, importer"org.scalatest.funsuite.FixtureAnyFunSuite", "org.scalatest.funsuite.FixtureAnyFunSuite")
-          case i @ Importee.Name(Name("Matchers")) if ownerText == "org.scalatest" =>
-            rewrite(i, importer"org.scalatest.matchers.should.Matchers", "org.scalatest.matchers.should.Matchers")
           case i @ Importee.Name(Name("MustMatchers")) if ownerText == "org.scalatest" =>
             rewrite(i, importer"org.scalatest.matchers.must.{Matchers => MustMatchers}", "org.scalatest.matchers.must.{Matchers => MustMatchers}")
           case i @ Importee.Wildcard() if ownerText == "org.scalatest.Matchers" =>

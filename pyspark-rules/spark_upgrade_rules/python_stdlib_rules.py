@@ -8,10 +8,14 @@ the call:
     Spark 3.5.5 supports: the `collections` ABC aliases (removed in 3.10) to
     `collections.abc`, `base64.encodestring`/`decodestring` (3.9) to
     `encodebytes`/`decodebytes`, `xml.etree.cElementTree` (3.9) to
-    `xml.etree.ElementTree`.
+    `xml.etree.ElementTree`; `json.loads`/`json.load`'s `encoding` argument
+    (3.9), ignored since Python 3.1, is dropped; `Thread.isAlive()` (3.9) to
+    `is_alive()` in a file that imports `threading`.
   - Reported, because the replacement behaves differently: `time.clock`,
     `cgi.escape`, `platform.linux_distribution`/`dist` (3.8), `os.errno` (3.7),
-    `fractions.gcd` (3.9), `inspect.getargspec` (3.11).
+    `fractions.gcd` (3.9), `inspect.getargspec` (3.11), and an `isAlive()`
+    call in a file that does not import `threading`, where the object may not
+    be a thread.
 """
 from __future__ import annotations
 
@@ -42,6 +46,30 @@ REPORTED = {
 
 ELEMENT_TREE = "xml.etree.cElementTree"
 
+JSON_READERS = frozenset({"json.loads", "json.load"})
+
+
+class _ImportsModule(cst.CSTVisitor):
+    def __init__(self, module_name: str) -> None:
+        super().__init__()
+        self.module_name = module_name
+        self.found = False
+
+    def visit_Import(self, node: cst.Import) -> None:
+        if any(get_full_name_for_node(a.name) == self.module_name for a in node.names):
+            self.found = True
+
+    def visit_ImportFrom(self, node: cst.ImportFrom) -> None:
+        if not node.relative and node.module is not None and get_full_name_for_node(node.module) == self.module_name:
+            self.found = True
+
+
+def _imports(module: cst.Module, module_name: str) -> bool:
+    """Whether `module` imports `module_name`, anywhere in it."""
+    visitor = _ImportsModule(module_name)
+    module.visit(visitor)
+    return visitor.found
+
 
 def _always(version: str) -> bool:
     """Removed by 3.8, the oldest Python Spark 3.5.5 supports."""
@@ -62,10 +90,32 @@ class PythonStdlibRemoved(Fixer):
         super().__init__(ctx)
         self.needs_abc_import = False
         self.has_abc_import = False
+        self.imports_threading = _imports(ctx.module, "threading")
 
     def visit_Import(self, node: cst.Import) -> None:
         if any(get_full_name_for_node(a.name) == "collections.abc" for a in node.names):
             self.has_abc_import = True
+
+    def leave_Call(self, original_node: cst.Call, updated_node: cst.Call) -> cst.BaseExpression:
+        if self.qualified(original_node.func) & JSON_READERS:
+            kept = [a for a in updated_node.args if not (a.keyword is not None and a.keyword.value == "encoding")]
+            if len(kept) == len(updated_node.args):
+                return updated_node
+            if kept:
+                kept[-1] = kept[-1].with_changes(comma=cst.MaybeSentinel.DEFAULT)
+            return self.rewrite(original_node, updated_node.with_changes(args=kept),
+                                f"json's encoding argument is gone: {_removed_in('3.9', 'it')}. It has been ignored since "
+                                "Python 3.1, so dropping it changes nothing.")
+        func = updated_node.func
+        if isinstance(func, cst.Attribute) and func.attr.value == "isAlive" and not original_node.args:
+            message = f"Thread.isAlive() is gone: {_removed_in('3.9')}."
+            if self.imports_threading:
+                return self.rewrite(original_node, updated_node.with_changes(func=func.with_changes(attr=cst.Name("is_alive"))),
+                                    f"{message} Rewritten to is_alive(), the same method since Python 2.6.")
+            # No threading import: the object may be something else with an isAlive method.
+            self.report(original_node, f"{message} If this object is a threading.Thread, call is_alive(), the same "
+                                       "method since Python 2.6.", "medium")
+        return updated_node
 
     def leave_Import(self, original_node: cst.Import, updated_node: cst.Import) -> cst.Import:
         names = list(updated_node.names)

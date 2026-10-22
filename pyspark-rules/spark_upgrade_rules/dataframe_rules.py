@@ -33,6 +33,49 @@ class _Scopes(cst.CSTVisitor):
                 self.stack[-1].setdefault(t.target.value, []).append(node.value)
 
 
+class _Assigned(cst.CSTVisitor):
+    def __init__(self) -> None:
+        super().__init__()
+        self.deps: dict[str, set[str]] = {}
+
+    def visit_Assign(self, node: cst.Assign) -> None:
+        names = _names_in(node.value)
+        for t in node.targets:
+            if isinstance(t.target, cst.Name):
+                self.deps.setdefault(t.target.value, set()).update(names)
+
+    def visit_FunctionDef(self, node: cst.FunctionDef) -> bool:
+        return False
+
+
+class _Names(cst.CSTVisitor):
+    def __init__(self) -> None:
+        super().__init__()
+        self.names: set[str] = set()
+
+    def visit_Name(self, node: cst.Name) -> None:
+        self.names.add(node.value)
+
+    def visit_Attribute(self, node: cst.Attribute) -> bool:
+        # `F.col`'s `col` is not a frame: only the value side of an attribute names one.
+        node.value.visit(self)
+        return False
+
+
+def _names_in(node: cst.CSTNode) -> set[str]:
+    visitor = _Names()
+    node.visit(visitor)
+    return visitor.names
+
+
+def _assigned_in(body: cst.CSTNode) -> dict[str, set[str]]:
+    """Each name a loop body assigns (outside functions defined in it), with
+    the names its value reads."""
+    visitor = _Assigned()
+    body.visit(visitor)
+    return visitor.deps
+
+
 def _root_name(node: cst.BaseExpression | None) -> str | None:
     root = _cst.spine_root(node)
     return root.value if isinstance(root, cst.Name) else None
@@ -54,9 +97,17 @@ class SelfJoinAmbiguousColumnDetect(Detector):
     failing ones."""
 
     rule_id = "SelfJoinAmbiguousColumnDetect"
+    # A join in a loop, of a frame the loop rebinds (`labels = nxt.localCheckpoint()`),
+    # with a column read through a frame name. From the second pass the frames
+    # share lineage, and 3.5.5 fails it even with failAmbiguousSelfJoin=false:
+    # MISSING_ATTRIBUTES (the 2026-10-19 user trial's customer-360 identity loop,
+    # probed on 2.4.8 and 3.5.5 2026-10-22: with or without a checkpoint). No
+    # config restores it, so it is reported under its own id.
+    MANUAL = "SelfJoinAmbiguousColumnDetect.Manual"
 
     def __init__(self, ctx) -> None:
         super().__init__(ctx)
+        self.loops: list[dict[str, set[str]]] = []
         scopes = _Scopes()
         ctx.module.visit(scopes)
         self.module_scope = scopes.stack[0]
@@ -66,6 +117,71 @@ class SelfJoinAmbiguousColumnDetect(Detector):
 
     def visit_FunctionDef(self, node: cst.FunctionDef) -> None:
         self.scope.append(self.by_scope.get(node, {}))
+
+    def visit_For(self, node: cst.For) -> None:
+        self.loops.append(_assigned_in(node.body))
+
+    def leave_For(self, original_node: cst.For) -> None:
+        self.loops.pop()
+
+    def visit_While(self, node: cst.While) -> None:
+        self.loops.append(_assigned_in(node.body))
+
+    def leave_While(self, original_node: cst.While) -> None:
+        self.loops.pop()
+
+    def _loop_sides(self, join: cst.Call) -> tuple[str, str] | None:
+        """Both sides of a join in a loop, when one reaches the other through
+        what the loop assigns (`nxt = labels.join(...)`, `labels = nxt...`): the
+        lineage they share from the second pass. A frame the loop builds afresh
+        each pass and joins to an unrelated one is left alone."""
+        recv, other = _cst.receiver(join), _cst.argument(join, 0, "other")
+        if not (self.loops and isinstance(recv, cst.Name) and isinstance(other, cst.Name)):
+            return None
+        graph: dict[str, set[str]] = {}
+        for loop in self.loops:
+            for name, deps in loop.items():
+                graph.setdefault(name, set()).update(deps)
+
+        def reaches(start: str, goal: str) -> bool:
+            seen, todo = set(), [start]
+            while todo:
+                n = todo.pop()
+                for d in graph.get(n, ()):
+                    if d == goal:
+                        return True
+                    if d not in seen:
+                        seen.add(d)
+                        todo.append(d)
+            return False
+
+        a, b = recv.value, other.value
+        return (a, b) if a != b and (reaches(a, b) or reaches(b, a)) else None
+
+    def _refs(self, node: cst.CSTNode, names: tuple[str, str]) -> list[str]:
+        """Every column reference through either frame, same-name pairs included."""
+        out: list[str] = []
+        stack = [node]
+        while stack:
+            n = stack.pop()
+            ref = self._column_ref(n, names) if isinstance(n, cst.BaseExpression) else None
+            if ref is not None:
+                out.append(f"{ref[0]}.{ref[1]}")
+            else:
+                stack.extend(n.children)
+        return out
+
+    def _flag_loop(self, join: cst.Call, sides: tuple[str, str], ref: str, where: str) -> None:
+        if id(join) in self.reported:
+            return
+        self.reported.add(id(join))
+        self.report(join, f"{sides[0]} is joined to {sides[1]} in a loop that rebinds "
+                          f"{' and '.join(sorted(n for n in sides if any(n in loop for loop in self.loops)))}, and {ref} is "
+                          f"referenced {where}. From the loop's second pass the two frames share lineage, and Spark 3.5 "
+                          "fails the plan with MISSING_ATTRIBUTES (or as an ambiguous self-join), even with "
+                          "spark.sql.analyzer.failAmbiguousSelfJoin=false; 2.4 ran it. Alias both sides each pass "
+                          "(a = x.alias('a'), b = y.alias('b')) and read columns as F.col('a.c'), or join on column names.",
+                    "medium", rule_id=self.MANUAL)
 
     def leave_FunctionDef(self, original_node: cst.FunctionDef) -> None:
         self.scope.pop()
@@ -120,7 +236,12 @@ class SelfJoinAmbiguousColumnDetect(Detector):
         return out
 
     def visit_Call(self, node: cst.Call) -> None:
-        if _cst.method_name(node) == "join":
+        if _cst.method_name(node) == "join" and (loop := self._loop_sides(node)) is not None:
+            on = _cst.argument(node, 1, "on")
+            refs = self._refs(on, loop) if on is not None else []
+            if refs:
+                self._flag_loop(node, loop, refs[0], "in the join condition")
+        if _cst.method_name(node) == "join" and id(node) not in self.reported:
             sides = self._sides(node)
             if sides is not None:
                 on = _cst.argument(node, 1, "on")
@@ -135,6 +256,12 @@ class SelfJoinAmbiguousColumnDetect(Detector):
             return
         for inner in _cst.spine(_cst.receiver(node)):
             if isinstance(inner, cst.Call) and _cst.method_name(inner) == "join":
+                loop = self._loop_sides(inner)
+                if loop is not None:
+                    refs = [r for a in node.args for r in self._refs(a.value, loop)]
+                    if refs:
+                        self._flag_loop(inner, loop, refs[0], f"in the .{_cst.method_name(node)}(...) after the join")
+                        break
                 sides = self._sides(inner)
                 if sides is not None:
                     refs = [r for a in node.args for r in self._risky_refs(a.value, sides)]

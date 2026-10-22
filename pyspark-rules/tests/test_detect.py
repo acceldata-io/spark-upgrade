@@ -245,6 +245,39 @@ class DataFrameRulesTest(unittest.TestCase):
         """
         self.assertEqual(run(code, self.rule), [], "ok7: df2 is rebound, so its lineage is not followed")
 
+    def test_a_join_in_a_loop_over_frames_the_loop_relinks(self):
+        # The 2026-10-19 user trial's customer-360 identity loop. Probed
+        # 2026-10-22: from the second pass 3.5.5 fails it with MISSING_ATTRIBUTES
+        # even with failAmbiguousSelfJoin=false, with or without the checkpoint;
+        # 2.4.8 runs it.
+        code = """
+            def components(labels, both):
+                for i in range(10):
+                    nxt = (labels.join(both, labels.node == both.src, "left")
+                           .select(F.coalesce(both.dst, labels.node).alias("node"), labels.label)
+                           .union(labels).groupBy("node").agg(F.min("label").alias("label")))
+                    changed = nxt.join(labels, ["node"]).where(nxt.label != labels.label).count()
+                    labels = nxt.localCheckpoint()
+                    if changed == 0:
+                        break
+                return labels
+        """
+        self.assertEqual(lines(code, self.rule + ".Manual"), [4, 7])
+        self.assertEqual(lines(code, self.rule), [], "not the config-restored rule: no config restores this")
+
+    def test_a_join_in_a_loop_of_frames_that_share_no_lineage_is_left(self):
+        code = """
+            def daily(spark, dim, days):
+                for d in days:
+                    facts = spark.read.parquet(d)
+                    out = facts.join(dim, facts.k == dim.k).select(facts.v, dim.name)
+                    out.write.parquet(d + "_out")
+                while todo:
+                    batch = todo.pop()
+                    joined = batch.join(dim, "k")
+        """
+        self.assertEqual(run(code, self.rule + ".Manual"), [])
+
     def test_na_replace_with_names_only(self):
         # Probed: replace skipped a missing or nested name on 2.4.8 and throws on
         # 3.5.5; fill/fillna failed on a missing name on both, so they are not flagged.

@@ -33,10 +33,8 @@ class ScalaTestExtendsFix
 
   override val isRewrite = true
 
-  private val renames: Map[String, String] = Map(
-    "FunSuite" -> "AnyFunSuite",
-    "FunSuiteLike" -> "AnyFunSuiteLike"
-  )
+  // Every suite style ScalaTest 3.1 moved, not only FunSuite (ScalaTestStyles).
+  private val renames: Map[String, String] = ScalaTestStyles.renamed
 
   override def fix(implicit doc: SyntacticDocument): Patch =
     doc.tree.collect { case Init(tpe, _, _) =>
