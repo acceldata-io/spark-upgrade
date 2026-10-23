@@ -15,7 +15,7 @@ import scala.meta._
  * `udf[...]` overload takes exactly ONE value argument and only this form
  * takes two, so an arity check on the matched call tells them apart.
  *
- * Tier 1 since 2026-10-13 where the typed form is exact: `f` is a lambda whose
+ * Tier 1 where the typed form is exact: `f` is a lambda whose
  * every parameter is annotated with a primitive, boxed primitive, String,
  * java.sql.Date or java.sql.Timestamp, and the DataType is one of the matching
  * atomic types. `udf(f, IntegerType)` becomes `udf[java.lang.Integer, A1, ...](f)`.

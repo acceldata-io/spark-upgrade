@@ -12,8 +12,7 @@ import org.openrewrite.marker.SearchResult;
  * {@code TaskContext.isRunningLocally()} was removed in Spark 3.0 along with
  * local execution (2.4.8 already returned a constant false). Verified present
  * (as an abstract method on the {@code TaskContext} class, plain Java-visible)
- * in the real {@code spark-core_2.11-2.4.8.jar} via {@code javap}
- * (2026-09-24).
+ * in the real {@code spark-core_2.11-2.4.8.jar} via {@code javap}.
  *
  * <p>Reports only the calls {@link SparkIsRunningLocallyRewrite} leaves alone:
  * a receiver that may have side effects, or a call in a loop condition.

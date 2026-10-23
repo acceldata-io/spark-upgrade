@@ -6,7 +6,7 @@ import scalafix.v1._
 import scala.meta._
 
 /**
- * Tier 3 detector (design review Part 2 Family F): since Spark 3.0,
+ * Tier 3 detector (Family F): since Spark 3.0,
  * `MapType` is disallowed as a map key in `map(...)`/`create_map(...)` and
  * `map_from_arrays(...)` -- analysis now fails outright instead of silently
  * accepting it. No legacy config restores this (the key type itself must

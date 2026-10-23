@@ -158,8 +158,7 @@ class Rule_NOCHARS_L003(BaseRule):
     length stored. From 3.1 a CHAR(n) value is padded to n and a VARCHAR(n)
     value longer than n fails the write. Rewriting either to string gives
     2.4's values, lengths and column type on 3.5.5, in data-source and
-    Hive-format tables and in CAST (spark-migrate-cli e2e/sql-diff
-    cases l003-*).
+    Hive-format tables and in CAST.
     """
 
     groups = ("all",)
@@ -775,7 +774,7 @@ def date_string_comparison_changes(literal: str, operator: str) -> bool:
     return operator in (">", "<=", "BETWEEN_HI")
 
 
-# What a template's run-time part is linted as (spark-migrate-cli's SqlLiteralLinter.Param).
+# What a template's run-time part is linted as: a caller fills each placeholder with this.
 PARAM_TEXT = "__param__"
 # A column whose name says it holds a date or a time: what a run-time string is compared with.
 _DATE_COLUMN = re.compile(r"(?i)(date|time|(^|_)(dt|ts|day)$)")
@@ -838,8 +837,8 @@ class Rule_DATESTRCOMPARE_L013(BaseRule):
             return None
         literal = context.segment.raw[1:-1]
         if literal == PARAM_TEXT:
-            # A value only known at run time ('{close_end}' in a template): the 2026-10-19 user trial's
-            # `posting_date <= '{close_end}'` got '2024-2-29', and February's balance took in March on 2.4.
+            # A value only known at run time ('{close_end}' in a template): for example,
+            # `posting_date <= '{close_end}'` given '2024-2-29' took in March on 2.4.
             other = _compared_column(code, i, operator)
             if other is None or not _DATE_COLUMN.search(other):
                 return None

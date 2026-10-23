@@ -7,7 +7,7 @@ import scala.meta._
 import scala.util.matching.Regex
 
 /**
- * Tier 2 / Class A detector (design review Part 2 Family B / Part 4): the
+ * Tier 2 / Class A detector (Family B): the
  * SQL `SET key=value` command now fails, instead of silently no-op'ing, when
  * `key` is a core (non-`spark.sql.*`) Spark config -- Spark 3.0's default
  * `spark.sql.legacy.setCommandRejectsSparkCoreConfs=true`. A SQL-text

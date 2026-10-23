@@ -11,14 +11,14 @@ import java.util.Arrays;
 import java.util.List;
 
 /**
- * Java-side rule closing a 2026-09-29 coverage-review gap against the MLlib
+ * Java-side rule closing a coverage gap against the MLlib
  * migration guide: the SGD-optimizer-based model classes -- {@code
  * LogisticRegressionWithSGD}, {@code LinearRegressionWithSGD}, {@code
  * RidgeRegressionWithSGD}, {@code LassoWithSGD} -- lose their static
  * {@code train(...)} methods and their public no-arg constructor in Spark
  * 3.0, so user code can no longer create or train one. The classes themselves
  * remain with only the 4-argument constructor, which is {@code private[mllib]}
- * in Scala ({@code javap} 2.4.8 vs 3.5.5, 2026-10-13). The replacements are
+ * in Scala ({@code javap} 2.4.8 vs 3.5.5). The replacements are
  * the {@code spark.ml} estimators (e.g. {@code
  * org.apache.spark.ml.classification.LogisticRegression}).
  *
@@ -28,7 +28,7 @@ import java.util.List;
  * resolved-type match would never fire. Detect-only (Tier 3): each class
  * has a differently-shaped {@code spark.ml} replacement (a different
  * package, a {@code Estimator}/{@code Transformer} pipeline shape instead
- * of a static {@code train(...)} call), so this is a rewrite a customer
+ * of a static {@code train(...)} call), so this is a rewrite a user
  * needs to design, not a mechanical one.
  */
 public class SparkMllibSgdModelUsageDetect extends Recipe {

@@ -2,8 +2,7 @@
 with them. For each rewrite: the site analysis reports as Tier 1 is exactly
 the site codegen rewrites, the rewritten file compiles, and the shapes it must
 not touch are left alone. Every rewrite here was run on Spark 3.5.5 first --
-the original fails or differs, the rewrite gives 2.4's result
-(spark-migrate-cli PYSPARK.md SS2.7)."""
+the original fails or differs, the rewrite gives 2.4's result."""
 import textwrap
 import unittest
 
@@ -305,7 +304,7 @@ class RemovedApiTest(unittest.TestCase):
 class AddMonthsSnapTest(unittest.TestCase):
     """Each rewritten shape was run on 3.5.5 and matched plain add_months on
     2.4.8 for 2019-02-28, '2019-04-30 10:00:00', 2020-02-29, 2019-02-15 and
-    null, with n = 1 and -1 (spark-migrate-cli PYSPARK.md SS2.7)."""
+    null, with n = 1 and -1."""
 
     rule = "AddMonthsSnapDetect"
 
@@ -382,8 +381,8 @@ class AddMonthsSnapTest(unittest.TestCase):
 
 class SplitEmptyRegexTest(unittest.TestCase):
     """split(s, "(?=)") on 3.5.5 matched split(s, "") on 2.4.8 for "abc", "",
-    None, "a", "a,b,", "  ", an accented letter and a supplementary character
-    (spark-migrate-cli e2e/sql-diff/cases/split-empty-regex)."""
+    None, "a", "a,b,", "  ", an accented letter and a supplementary
+    character."""
 
     rule = "SplitEmptyRegexDetect"
     manual = "SplitEmptyRegexDetect.Manual"
@@ -688,7 +687,7 @@ class NewDetectorsTest(unittest.TestCase):
 
 class StarImportShadowsTest(unittest.TestCase):
     """3.5.5's `from pyspark.sql.functions import *` binds 255 names 2.4.8's did
-    not. Probed in docker: the rewritten file prints 2.4.8's output on 3.5.5;
+    not. Probed: the rewritten file prints 2.4.8's output on 3.5.5;
     the original raises (`reduce() missing ... 'merge'`)."""
     rule = "StarImportShadowsFilter"
 
@@ -795,9 +794,9 @@ if __name__ == "__main__":
 
 
 class PythonStdlibRemovedTest(unittest.TestCase):
-    """Standard-library names Python 3.6/3.7 had and 3.8-3.11 do not (the
-    2026-10-16 user trial: `from collections import Iterable` failed at import
-    on Python 3.10). Each rewrite is the same object on every Python 3 Spark
+    """Standard-library names Python 3.6/3.7 had and 3.8-3.11 do not (for
+    example, `from collections import Iterable` fails at import on Python
+    3.10). Each rewrite is the same object on every Python 3 Spark
     3.5.5 supports."""
     rule = "PythonStdlibRemoved"
 
@@ -870,8 +869,8 @@ class PythonStdlibRemovedTest(unittest.TestCase):
 
 
 class PythonStdlibCallsTest(unittest.TestCase):
-    """The 2026-10-20 user trial's iot job: `json.loads(s, encoding=...)` failed
-    its tests and `Thread.isAlive()` crashed the job at its end, on Python 3.10."""
+    """On Python 3.10, `json.loads(s, encoding=...)` raises a TypeError and
+    `Thread.isAlive()` an AttributeError."""
     rule = "PythonStdlibRemoved"
 
     def test_json_encoding_is_dropped(self):
@@ -910,9 +909,9 @@ class PythonStdlibCallsTest(unittest.TestCase):
 
 
 class PythonLibraryRemovedTest(unittest.TestCase):
-    """numpy 1.24, pandas 2.0 and PyYAML 6 removals (the 2026-10-19 user trial:
-    customer-360's tests failed on np.float, Series.iteritems, DataFrame.append
-    and yaml.load once pip installed current releases on Python 3.10)."""
+    """numpy 1.24, pandas 2.0 and PyYAML 6 removals (np.float, Series.iteritems,
+    DataFrame.append and yaml.load fail once pip installs current releases on
+    Python 3.10)."""
     rule = "PythonLibraryRemoved"
 
     @staticmethod

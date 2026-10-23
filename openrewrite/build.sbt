@@ -8,19 +8,16 @@
 // which needs Scala to depend on scalafix-core) -- crossPaths/autoScalaLibrary
 // are both off so the published artifact carries no `_2.12` suffix.
 //
-// See spark-migrate-java-openrewrite-integration-2026-09-18.md SS8.4: this
-// keeps "one place holds all migration knowledge, spark-migrate-cli only
-// orchestrates" intact for Java the same way it already does for Scala/SQL/
-// PySpark.
+// This keeps all migration knowledge in this repo for Java, the same way it
+// already is for Scala, SQL and PySpark: a caller only runs the recipes.
 ThisBuild / organization := "com.acceldata"
 ThisBuild / version := "0.1.0-SNAPSHOT"
 ThisBuild / scalaVersion := "2.12.18" // sbt itself needs a Scala version pinned; no Scala source uses it
 
 // OpenRewrite's own docs caution that the parser/recipe-execution APIs are
-// not guaranteed stable across releases (spark-migrate-java-openrewrite-
-// integration-2026-09-18.md SS2.5 item 2) -- pin an exact version
+// not guaranteed stable across releases -- pin an exact version
 // deliberately, verified against Maven Central at the time this module was
-// written (2026-09-21), not "latest".
+// written, not "latest".
 val openRewriteVersion = "8.56.1"
 val rewriteMigrateJavaVersion = "3.12.0"
 
@@ -41,7 +38,7 @@ lazy val root = (project in file("."))
       "org.openrewrite" % "rewrite-java-17" % openRewriteVersion,
       // Ships org.openrewrite.java.migrate.UpgradeToJava17, resolved at
       // runtime via Environment.scanRuntimeClasspath() (RecipeCatalog) --
-      // confirmed against a real spike this session, not assumed from docs.
+      // confirmed against a real spike, not assumed from docs.
       "org.openrewrite.recipe" % "rewrite-migrate-java" % rewriteMigrateJavaVersion,
       // Result.diff() shells jgit internally (InMemoryDiffEntry), which needs
       // slf4j-api at runtime -- confirmed the hard way via `cs launch`
@@ -78,7 +75,7 @@ lazy val root = (project in file("."))
     Compile / packageDoc / publishArtifact := false,
     // Each RewriteTest spec builds its own JavaParser + real-jar type
     // attribution; sbt's default forked-test heap isn't enough once the
-    // recipe count grew past ~15 test classes in the 2026-09-24 session
+    // recipe count grew past ~15 test classes
     // (observed: real OutOfMemoryError mid-suite, not a flaky failure).
     Test / fork := true,
     Test / javaOptions += "-Xmx3g",

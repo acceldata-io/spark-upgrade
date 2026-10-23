@@ -6,12 +6,11 @@ import scalafix.v1._
 import scala.meta._
 
 /**
- * Tier 2 / Class A detector (design review Part 2 Family D / Part 4):
+ * Tier 2 / Class A detector (Family D):
  * flags datetime pattern-string literals passed to
  * `date_format`/`to_date`/`to_timestamp`/`unix_timestamp`/`from_unixtime`
  * that Spark 3.0's switch from `SimpleDateFormat` to `DateTimeFormatter`
- * treats differently. Until 2026-10-15 it checked only `hh` without `a` and
- * `F`; it now applies `DateTimePatterns.check`, the PySpark rule's probed
+ * treats differently. It applies `DateTimePatterns.check`, the PySpark rule's probed
  * table: week-based letters (`Y w W u`), parsing with `E`/`F`, five-letter
  * text forms, DateTimeFormatter's letter-count limits, the reserved `# { }`
  * and `[ ]`, `F` when formatting and `h` without `a` when parsing. Verifying

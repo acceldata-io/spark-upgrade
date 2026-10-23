@@ -3,9 +3,8 @@ environment installs have removed.
 
 A Spark 3.5.5 job runs on Python 3.8 to 3.11, where pip installs current
 releases of anything left unpinned: numpy 1.24 or later, PyYAML 6, and pandas
-2 unless the requirements cap it (spark-migrate-cli caps a pandas it raises
-below 2). Code written against the old releases then fails at the call (the
-2026-10-19 user trial: customer-360's tests failed on each of these):
+2 unless the requirements cap it. Code written against the old releases then
+fails at the call:
 
   - Rewritten, because the replacement is the same thing on every release:
     numpy's aliases of the builtin types (`np.float`, `np.int`, `np.bool`,

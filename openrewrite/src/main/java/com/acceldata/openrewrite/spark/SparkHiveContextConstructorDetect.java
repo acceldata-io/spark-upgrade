@@ -14,15 +14,15 @@ import java.util.List;
 /**
  * Java-side counterpart to the Scalafix {@code MigrateHiveContext} rule:
  * {@code HiveContext} is deprecated since 2.0 (all three constructors still
- * exist in 3.5.5, {@code javap} 2026-10-13); migrate to
+ * exist in 3.5.5, {@code javap}); migrate to
  * {@code SparkSession.builder().enableHiveSupport().getOrCreate()}. All
  * three constructors verified present in the real {@code
- * spark-hive_2.11-2.4.8.jar} via {@code javap} (2026-09-24).
+ * spark-hive_2.11-2.4.8.jar} via {@code javap}.
  *
  * <p>Detect-only, for the same reason {@code SparkSqlContextConstructorDetect}
  * is: the Java rewrite needs a {@code JavaTemplate} restructuring a
  * constructor call into a builder chain, which needs classpath-resolution
- * setup this pass doesn't have.
+ * setup this recipe set doesn't have.
  */
 public class SparkHiveContextConstructorDetect extends Recipe {
 

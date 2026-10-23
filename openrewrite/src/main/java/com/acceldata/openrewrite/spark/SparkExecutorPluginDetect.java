@@ -15,7 +15,7 @@ import org.openrewrite.marker.SearchResult;
  * of {@code org.apache.spark.api.plugin.SparkPlugin}; a removed API
  * implemented anywhere is a hard compile break. {@code ExecutorPlugin} is
  * already a plain Java interface in 2.4.8 (verified via {@code javap}
- * against the real {@code spark-core_2.11-2.4.8.jar}, 2026-09-24 -- it's
+ * against the real {@code spark-core_2.11-2.4.8.jar} -- it's
  * compiled from {@code ExecutorPlugin.java}, not a Scala trait), so a Java
  * class implementing it is exactly as reachable as a Scala one.
  *

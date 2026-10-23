@@ -116,7 +116,7 @@ class SparkSqlLiteralExtractTest implements RewriteTest {
     }
     @Test
     void marksEachStatementOfAListLoopedIntoSql() {
-        // The 2026-10-19 user trial's shape: DDL kept in a list and run in a loop.
+        // DDL kept in a list and run in a loop.
         rewriteRun(
                 java(
                         """

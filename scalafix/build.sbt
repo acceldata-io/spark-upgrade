@@ -12,7 +12,7 @@ inThisBuild(
     // collide with upstream holdenk releases. Apache-2.0 license + upstream
     // attribution retained (see `developers` below).
     organization := "com.acceldata",
-    homepage := Some(url("https://github.com/holdenk/spark-auto-upgrade")),
+    homepage := Some(url("https://github.com/acceldata-io/spark-upgrade")),
     licenses := List("Apache-2.0" -> url("http://www.apache.org/licenses/LICENSE-2.0")),
     srcSparkVersion := System.getProperty("sparkVersion", "2.4.8"),
     // 3.5.5, the migration's target: some outputs (ExpressionEncoder(schema)) only exist there.

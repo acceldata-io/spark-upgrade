@@ -25,7 +25,7 @@ import java.util.List;
  * {@code org.apache.spark.sql.streaming.ProcessingTime} is removed in Spark
  * 3.x, and {@code Trigger.ProcessingTime(...)} replaces it.
  *
- * <p>What 2.4.8's {@code ProcessingTime} exposes ({@code javap}, 2026-10-13),
+ * <p>What 2.4.8's {@code ProcessingTime} exposes ({@code javap}),
  * and where each goes. Every target overload exists in 3.5.5's {@code Trigger}
  * (and already in 2.4.8's, where it delegated to {@code ProcessingTime}):
  * <ul>

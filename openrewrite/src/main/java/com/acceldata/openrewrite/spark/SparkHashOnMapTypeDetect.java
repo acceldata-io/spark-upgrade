@@ -15,17 +15,16 @@ import org.openrewrite.marker.SearchResult;
  * instead of silently hashing. Narrowed exactly like the Scala rule to the
  * unambiguous, zero-false-positive case: the argument is itself a direct
  * {@code functions.map(...)} call. Feeds {@code
- * spark.sql.legacy.allowHashOnMapType} -- Tier 2 as of 2026-09-25, cross-linked
- * into the existing {@code LegacyConfigRegistry} entry's {@code detectionRuleIds}
- * so Phase B (spark-migrate-cli's {@code PhaseBRunner}) actually injects it.
+ * spark.sql.legacy.allowHashOnMapType} -- Tier 2, cross-linked
+ * to that config so a caller can inject it.
  *
  * <p>{@code xxhash64} is deliberately NOT matched here, unlike the Scala
  * rule: verified via {@code javap} against the real {@code
- * spark-sql_2.11-2.4.8.jar} (2026-09-24) that {@code functions.xxhash64}
+ * spark-sql_2.11-2.4.8.jar} that {@code functions.xxhash64}
  * does not exist at all in 2.4.8 (it was added in Spark 3.0) -- a 2.4.8
  * Java codebase cannot call a method that doesn't exist yet, the same
  * "verify Java-reachability before writing" discipline that already dropped
- * {@code grouping_id}'s Java counterpart (STATUS.md SS2.5).
+ * {@code grouping_id}'s Java counterpart.
  */
 public class SparkHashOnMapTypeDetect extends Recipe {
 

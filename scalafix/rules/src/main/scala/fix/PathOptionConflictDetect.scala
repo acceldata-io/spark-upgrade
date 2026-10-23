@@ -13,7 +13,7 @@ import scala.meta.tokens.Token
  * `.load(...)`/`.save(...)` call with arguments appear in the same receiver
  * chain.
  *
- * Tier 1 since 2026-10-13 for one path argument: 2.4.8's `load(path)` is
+ * Tier 1 for one path argument: 2.4.8's `load(path)` is
  * `option("path", path).load()`, so the argument overwrote the option, and
  * dropping the option gives 2.4's result (probed on 2.4.8 and 3.5.5: read
  * `option("path", p1).load(p2)` and `options(Map("path" -> p1, ...)).load(p2)`

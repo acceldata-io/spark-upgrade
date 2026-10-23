@@ -6,7 +6,7 @@ import scalafix.v1._
 import scala.meta._
 
 /**
- * Tier 3 detector (design review Part 2 Family G): Spark 3.5 introduces
+ * Tier 3 detector (Family G): Spark 3.5 introduces
  * `EnhancedAnalysisException` and reshapes how a failed analysis's plan is
  * exposed on the caught exception. No exact rewrite exists: probed on 2.4.8
  * and 3.5.5, reading the plan through ExtendedAnalysisException matches 2.4's

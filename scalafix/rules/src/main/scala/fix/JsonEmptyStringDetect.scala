@@ -17,7 +17,7 @@ import scala.meta._
  * nothing to reject. An explicit schema is what makes an empty string land
  * against an int/date/boolean column.
  *
- * And narrowed (2026-10-15) to the modes where the malformed record is
+ * And narrowed to the modes where the malformed record is
  * visible. Probed on 2.4.8 and 3.5.5 (`{"a":"","b":1}` with `a INT`): in the
  * default PERMISSIVE mode 3.5.5 keeps the record's other fields and nulls
  * this one, exactly 2.4's row. What differs is FAILFAST (3.5.5 fails the

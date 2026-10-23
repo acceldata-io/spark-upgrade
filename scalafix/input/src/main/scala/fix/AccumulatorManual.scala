@@ -4,7 +4,7 @@
 import org.apache.spark.{Accumulator, SparkContext}
 
 // No exact typed accumulator for these: each is reported for a person and left
-// as it is, so the file still compiles on 2.4 for the next Phase A rule. The
+// as it is, so the file still compiles on 2.4 for the next rule. The
 // Accumulator import stays while a usage still names the type. Input-only: the
 // code still uses APIs Spark 3 removed.
 object AccumulatorManual {

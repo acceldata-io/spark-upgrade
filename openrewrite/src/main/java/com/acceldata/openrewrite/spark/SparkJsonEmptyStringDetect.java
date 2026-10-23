@@ -21,7 +21,7 @@ import java.util.List;
  * {@code .schema(...)} call -- with an inferred schema every field that ever
  * holds {@code ""} is inferred as a string, so there is nothing to reject.
  *
- * <p>And, since 2026-10-15, to the modes where the malformed record is
+ * <p>And to the modes where the malformed record is
  * visible. Probed on 2.4.8 and 3.5.5: in the default PERMISSIVE mode 3.5.5
  * gives 2.4's row (this field null, the others kept); FAILFAST fails the job,
  * DROPMALFORMED drops the row and a corrupt-record column fills. So the read

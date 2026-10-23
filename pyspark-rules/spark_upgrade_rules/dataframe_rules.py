@@ -1,7 +1,7 @@
 """Family G: DataFrame API behaviour changes -- the ambiguous self-join and the
 DataFrameNaFunctions column-name change. Matched on method shape (a DataFrame
 has no qualified name), narrowed by what the probes against Spark 3.5.5
-showed actually fails (PYSPARK.md SS8.12).
+showed actually fails.
 """
 from __future__ import annotations
 
@@ -100,8 +100,8 @@ class SelfJoinAmbiguousColumnDetect(Detector):
     # A join in a loop, of a frame the loop rebinds (`labels = nxt.localCheckpoint()`),
     # with a column read through a frame name. From the second pass the frames
     # share lineage, and 3.5.5 fails it even with failAmbiguousSelfJoin=false:
-    # MISSING_ATTRIBUTES (the 2026-10-19 user trial's customer-360 identity loop,
-    # probed on 2.4.8 and 3.5.5 2026-10-22: with or without a checkpoint). No
+    # MISSING_ATTRIBUTES (an iterative identity-resolution loop, probed on 2.4.8
+    # and 3.5.5: with or without a checkpoint). No
     # config restores it, so it is reported under its own id.
     MANUAL = "SelfJoinAmbiguousColumnDetect.Manual"
 

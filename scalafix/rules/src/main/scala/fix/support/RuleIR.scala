@@ -8,9 +8,9 @@ import scala.meta._
 
 /**
  * Static metadata for a rule, independent of any single finding it produces.
- * This is the single source of truth for tier/confidence/doc-link -- the
- * orchestrator (spark-migrate-cli) reads this via RuleRegistry rather than
- * hardcoding tier classifications on its own side.
+ * This is the single source of truth for tier/confidence/doc-link -- a caller
+ * reads this via RuleRegistry rather than hardcoding tier classifications on
+ * its own side.
  */
 final case class RuleMeta(
     ruleId: String,
@@ -19,10 +19,10 @@ final case class RuleMeta(
     docLink: String,
     defaultConfidence: String,
     // True when the rule's rewrite output does not compile against Spark
-    // 2.4.8 (it names a 3.x-only symbol). Scala Phase A recompiles SemanticDB
-    // against the OLD classpath before every rule, so the CLI runs all
-    // targetOnly rules together in ONE final scalafix invocation, after every
-    // other Tier 1 rule (TRIAGE-PLAN-2026-10-13 §3.1.1). No two targetOnly
+    // 2.4.8 (it names a 3.x-only symbol). SemanticDB is recompiled against
+    // the OLD classpath before every Tier 1 rule, so all targetOnly rules run
+    // together in ONE final scalafix invocation, after every other Tier 1
+    // rule. No two targetOnly
     // rules may rewrite the same span. Only meaningful for tier 1.
     targetOnly: Boolean = false
 )
@@ -30,14 +30,14 @@ final case class RuleMeta(
 object RuleRegistry {
   private val entries: Seq[RuleMeta] = Seq(
     RuleMeta(
-      // Promoted back to Tier 1 (2026-08-22): the rule now handles the
+      // Promoted back to Tier 1: the rule now handles the
       // three ways this hard break actually shows up in real code --
       // the call site (0L/0.0 constructor forms, named or not), the
       // Accumulator[Long]/[Double] type annotation, and the now-invalid
       // `import org.apache.spark.Accumulator` -- and every case it can't
       // safely resolve (non-zero initial value, Int/other type arg) is
       // reported as AccumulatorUpgrade.ManualMigration (Tier 3) and left as
-      // written: it still compiles on 2.4 for the next Phase A rule, and the
+      // written: it still compiles on 2.4 for the next rule, and the
       // compile gate names it on 3.5.
       ruleId = "AccumulatorUpgrade",
       tier = 1,
@@ -94,7 +94,7 @@ object RuleRegistry {
     // entry, so it never ran in Analysis (RuleDiscovery.allRuleIds() is what
     // enables it there now) and never produced a structured finding even
     // when it ran in Code Changes -- see RuleFinding.report at each rule's
-    // fire site. Defaulted to Tier 3 (manual review): Phase A auto-applies
+    // fire site. Defaulted to Tier 3 (manual review): a caller auto-applies
     // any Tier 1 rule with no other safety gate, and none of these have been
     // exercised through this pipeline before. Promote individually once
     // proven safe on real repos.
@@ -133,7 +133,7 @@ object RuleRegistry {
       docLink = "https://archive.apache.org/dist/spark/docs/3.0.0/core-migration-guide.html",
       defaultConfidence = "medium"
     ),
-    // Stays Tier 3 (2026-10-13 probe): the rule's rewrite,
+    // Stays Tier 3 (probed): the rule's rewrite,
     // getCommonSubexpressions.map(List(_)), is not 2.4's result. For
     // (a+b)*(a+b) and (a+b)+1, 2.4.8's getAllEquivalentExprs returned every
     // equivalence class, singletons included, each with all its occurrences
@@ -147,7 +147,7 @@ object RuleRegistry {
       docLink = "https://spark.apache.org/docs/latest/core-migration-guide.html",
       defaultConfidence = "low"
     ),
-    // Tier 1 since 2026-10-13, targetOnly: createSerializer/createDeserializer
+    // Tier 1, targetOnly: createSerializer/createDeserializer
     // do not exist in 2.4.8. Probed on 2.4.8 and 3.5.5: the same row bytes and
     // decoded values; only 2.4's shared toRow buffer (a row kept without
     // .copy() was overwritten by the next call) is not reproduced.
@@ -156,7 +156,7 @@ object RuleRegistry {
       // Tier 3, not 1: the rewrite is not exact. 2.4's toRow reused one row
       // buffer per encoder, so a row kept without .copy() was overwritten by
       // the next call; createSerializer() gives each serializer its own buffer
-      // (probed 2026-10-13). The compile gate names these lines.
+      // (probed). The compile gate names these lines.
       tier = 3,
       description = "ExpressionEncoder.toRow/fromRow were removed in Spark 3.0: use enc.createSerializer()(x) / enc.createDeserializer()(r). Not rewritten automatically because it is not exact: 2.4's toRow reused one row buffer per encoder, so a row kept without .copy() was overwritten by the next call; with createSerializer() it is not. Check whether the code relied on that.",
       docLink = "https://spark.apache.org/docs/latest/core-migration-guide.html",
@@ -219,15 +219,14 @@ object RuleRegistry {
       docLink = "https://docs.sqlfluff.com/en/stable/dialects.html",
       defaultConfidence = "high"
     ),
-    // Tier 2 / Class A config-injection detectors (2026-08-17 review Part 4;
-    // gap-analysis 2026-08-21 SS2.2): each one names a
-    // spark.sql.legacy.* config in LegacyConfigRegistry that its firing
-    // makes eligible for Phase B's submit-conf injection. Detection-only --
+    // Tier 2 / Class A config-injection detectors: each one names a
+    // spark.sql.legacy.* config that its firing makes eligible for
+    // injection into the job's submit config. Detection-only --
     // no code rewrite -- by definition of Tier 2 in the tier taxonomy.
     // Never config-injected: probed, udf((x: Int) => x + 1, IntegerType)
     // on [1, null] gives [2, null] on 2.4.8 but [2, 1] on 3.5.5 with
     // spark.sql.legacy.allowUntypedScalaUDF=true, and that config is job-global.
-    // Tier 1 since 2026-10-13 for a lambda with simple annotated parameters
+    // Tier 1 for a lambda with simple annotated parameters
     // and a simple DataType: the typed UDF with a boxed result type was probed
     // equal to 2.4's untyped one (name, type, nullability, values, nulls).
     RuleMeta(
@@ -258,7 +257,7 @@ object RuleRegistry {
       docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
       defaultConfidence = "medium"
     ),
-    // Tier 1 since 2026-10-13 for one path argument (probed: 2.4.8 used the
+    // Tier 1 for one path argument (probed: 2.4.8 used the
     // argument); every other shape is the Tier 2 .Config sub-id.
     RuleMeta(
       ruleId = "PathOptionConflictDetect",
@@ -281,7 +280,7 @@ object RuleRegistry {
       docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
       defaultConfidence = "high"
     ),
-    // Tier 1 since 2026-10-13 where the generated column name is discarded
+    // Tier 1 where the generated column name is discarded
     // (probed exact, nullability included); elsewhere the Tier 2 .Config sub-id.
     RuleMeta(
       ruleId = "EmptyCollectionTypeDetect",
@@ -325,7 +324,7 @@ object RuleRegistry {
       docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
       defaultConfidence = "high"
     ),
-    // Family D/F/G additions (2026-08-22 design review pass). Tier 3 unless
+    // Family D/F/G additions. Tier 3 unless
     // otherwise noted -- each of these either has no legacy config at all
     // (Family D/F silent-drift and hard-break items) or would share a config
     // key with an existing Class B entry that the registry can't split
@@ -333,10 +332,10 @@ object RuleRegistry {
     // spark-sql/spark-catalyst jars before writing: functions.exists,
     // functions.array_insert, and Dataset.unionByName(_, Boolean) don't exist
     // in 2.4.8 at all (added in 3.0/3.4/3.1 respectively), so no 2.4.8
-    // codebase could contain the patterns those design-review items describe
+    // codebase could contain the patterns those migration-guide items describe
     // -- deliberately not implemented as detectors for that reason, not
     // overlooked.
-    // Tier 1 since 2026-10-13: the rewrite uses only functions 2.4 has and was
+    // Tier 1: the rewrite uses only functions 2.4 has and was
     // probed exact on 2.4.8 and 3.5.5 (dates, timestamps, strings, Feb 29,
     // ordinary days, null). A call whose arguments are not safe to repeat is
     // reported as AddMonthsSnapDetect.Manual (Tier 3) and left as written.
@@ -368,7 +367,7 @@ object RuleRegistry {
       docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
       defaultConfidence = "high"
     ),
-    // Tier 1 since 2026-10-15: split(s, "(?=)") on 3.5.5 gave 2.4.8's
+    // Tier 1: split(s, "(?=)") on 3.5.5 gave 2.4.8's
     // split(s, "") for every input probed, and runs on 2.4 too (not
     // targetOnly). Applied only where the generated column name is discarded.
     RuleMeta(
@@ -399,7 +398,7 @@ object RuleRegistry {
       docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
       defaultConfidence = "medium"
     ),
-    // Stays Tier 3 (2026-10-13 probe): reading the plan through
+    // Stays Tier 3 (probed): reading the plan through
     // ExtendedAnalysisException is not 2.4's result. It matches 2.4.8's
     // plan.isDefined for unresolved columns, type mismatches, bad GROUP BY,
     // union arity, df.col, undefined functions and parse errors, but a missing
@@ -412,19 +411,19 @@ object RuleRegistry {
       docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
       defaultConfidence = "medium"
     ),
-    // Family B/C/E/H additions (2026-08-22 design review pass, second round).
+    // Family B/C/E/H additions.
     // Verified against the real 2.4.8 jars before writing, same discipline
-    // as the Family D/F/G pass above: SparkSession.cloneSession() (Family B)
+    // as the Family D/F/G additions above: SparkSession.cloneSession() (Family B)
     // is `private[sql]` in 2.4.8's own source -- no external application code
-    // can call it at all, so that design-review item is moot for detecting
-    // customer code, not overlooked. SparkContext-in-executor (Family A) and
+    // can call it at all, so that migration-guide item is moot for detecting
+    // user code, not overlooked. SparkContext-in-executor (Family A) and
     // the string<->date binary-comparison cast (Family E) were assessed and
     // deliberately NOT implemented -- both need either closure/lexical-scope
     // tracing or real type inference to avoid false positives/negatives
     // Scalafix's AST-level matching can't provide with confidence. Family J
-    // (Hive interop) has no new rule for the same reason RuleRegistry never
-    // had one before this pass: it's platform config, already covered as
-    // report-only Class C entries in LegacyConfigRegistry, not app code.
+    // (Hive interop) has no rule for the same reason RuleRegistry never had
+    // one: it's platform config, already covered as
+    // report-only Class C configs, not app code.
     RuleMeta(
       ruleId = "UserDefinedAggregateFunctionDetect",
       tier = 3,
@@ -439,8 +438,8 @@ object RuleRegistry {
       docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
       defaultConfidence = "high"
     ),
-    // Ported from pyspark-rules 2026-10-15. Its config is in the CLI's
-    // baseline set, so the finding counts as done for the user.
+    // Ported from pyspark-rules. Its config is one a migration sets by
+    // default, so the finding counts as done for the user.
     RuleMeta(
       ruleId = "CommandOutputSchemaDetect",
       tier = 2,
@@ -455,8 +454,8 @@ object RuleRegistry {
       docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
       defaultConfidence = "medium"
     ),
-    // 2026-08-24 pass, driven by an item-by-item audit against the upstream
-    // SQL and core migration guides (see the coverage doc). Every candidate was
+    // From an item-by-item audit against the upstream SQL and core migration
+    // guides. Every candidate was
     // checked against the real spark-*_2.11-2.4.8 jars with javap FIRST -- that
     // discipline dropped two rules from this batch before they were written
     // (`Row.json`/`prettyJson` do not exist in 2.4.8 at all, and 2.4.8's
@@ -469,7 +468,7 @@ object RuleRegistry {
       docLink = "https://spark.apache.org/docs/latest/core-migration-guide.html",
       defaultConfidence = "high"
     ),
-    // Tier 1 since 2026-10-13: 2.4.8's isRunningLocally is `return false`.
+    // Tier 1: 2.4.8's isRunningLocally is `return false`.
     RuleMeta(
       ruleId = "IsRunningLocallyWarn",
       tier = 1,
@@ -484,7 +483,7 @@ object RuleRegistry {
       docLink = "https://archive.apache.org/dist/spark/docs/3.0.0/core-migration-guide.html",
       defaultConfidence = "high"
     ),
-    // Tier 1 since 2026-10-13: probed same columns and rows as 2.4.8.
+    // Tier 1: probed same columns and rows as 2.4.8.
     RuleMeta(
       ruleId = "FromWithoutSelectDetect",
       tier = 1,
@@ -506,7 +505,7 @@ object RuleRegistry {
       docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
       defaultConfidence = "high"
     ),
-    // Tier 1 since 2026-10-13 for the constructor only, targetOnly (the
+    // Tier 1 for the constructor only, targetOnly (the
     // 3-argument constructor does not exist in 2.4.8); every other reference
     // is the Tier 3 .Manual sub-id.
     RuleMeta(
@@ -524,7 +523,7 @@ object RuleRegistry {
       docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
       defaultConfidence = "medium"
     ),
-    // New 2026-10-13, Tier 1, targetOnly: OneHotEncoder is the old
+    // Tier 1, targetOnly: OneHotEncoder is the old
     // Transformer in 2.4.8. javap and a fit/transform probe: the 3.5.5
     // OneHotEncoder is 2.4.8's OneHotEncoderEstimator plus single-column params.
     RuleMeta(
@@ -578,7 +577,7 @@ object RuleRegistry {
       defaultConfidence = "high"
     ),
     // The sqlfluff plugin's 13 Family K codes, split by whether `rules.py`
-    // implements a `LintFix` for them (2026-08-26 tier promotion). The 6
+    // implements a `LintFix` for them. The 6
     // fixable codes are now real, correctly-attributed Tier 1 rewrites --
     // lint runs against the original SQL before `fix` touches it, so each
     // code is captured from the actual violation, not lost/misattributed
@@ -586,8 +585,8 @@ object RuleRegistry {
     // their own Tier 3 entry so they DON'T inherit the parent's new Tier 1
     // through the sub-rule fallback in `apply` below -- they have no fix,
     // so auto-applying them would be wrong. CTEPRECEDENCE_L010 keeps its
-    // Tier 2: no fix exists for it, and it's the one code Phase B's
-    // config-injection actually keys on (spark.sql.legacy.ctePrecedencePolicy).
+    // Tier 2: no fix exists for it, and it's the one code the config
+    // injection actually keys on (spark.sql.legacy.ctePrecedencePolicy).
     RuleMeta(
       ruleId = "SparkSQLCallExternal.SPARKSQLCAST_L001",
       tier = 3,
@@ -747,14 +746,13 @@ object RuleRegistry {
       docLink = "https://spark.apache.org/docs/latest/sql-migration-guide.html",
       defaultConfidence = "medium"
     ),
-    // Not a Spark API change -- a Scala 2.11 -> 2.12 SOURCE break (code
-    // review 2026-08-22 §8.2). The tool bumps scalaVersion to 2.12 (Tier 1)
-    // but had nothing for the source-level fallout of that bump until this
+    // Not a Spark API change -- a Scala 2.11 -> 2.12 SOURCE break. A
+    // migration bumps scalaVersion to 2.12 but there was nothing for the source-level fallout of that bump until this
     // rule; a purely syntactic, exact rewrite (insert ": Unit =" before an
     // existing body, nothing else touched), so it earns Tier 1 the same way
-    // MigrateHiveContext/MigrateTrigger/onFailureFix did in the 2026-08-25
-    // tier audit -- and being compile-breaking, any mistake here is caught
-    // immediately by the compile gate.
+    // MigrateHiveContext/MigrateTrigger/onFailureFix did in a tier audit --
+    // and being compile-breaking, any mistake here is caught immediately by
+    // the compile gate.
     RuleMeta(
       ruleId = "ProcedureSyntaxDetect",
       tier = 1,
@@ -762,10 +760,10 @@ object RuleRegistry {
       docLink = "https://docs.scala-lang.org/scala3/guides/migration/incompat-syntactic.html#procedure-syntax",
       defaultConfidence = "high"
     ),
-    // New 2026-10-13: source that compiles on 2.4.8/2.11/JDK 8 and not on
+    // Source that compiles on 2.4.8/2.11/JDK 8 and not on
     // 3.5.5/2.12/JDK 17, each probed both ways. Every finding is a
     // `CompileBreakDetect.<Sub>` sub-id with its own text. Tier 1, targetOnly
-    // since 2026-10-14 for the rows with an exact rewrite (they inherit this
+    // for the rows with an exact rewrite (they inherit this
     // entry); the rows without one and every `.Manual` site are Tier 3 below.
     RuleMeta(
       ruleId = "CompileBreakDetect",
@@ -822,7 +820,7 @@ object RuleRegistry {
  * One concrete finding a rule produced at a specific source location.
  * `explanation` is the "why does this matter" text, `change` is the "what
  * would/did change" text -- the two halves of the rough diagnostic format
- * agreed for this iteration (ruleId + explanation + what needs to change).
+ * (ruleId + explanation + what needs to change).
  */
 final case class RuleChange(ruleId: String, why: String, change: String, position: Position) extends Diagnostic {
   override def message: String = s"$why\nChange: $change"
@@ -834,13 +832,13 @@ object RuleChange {
 }
 
 /**
- * Append-only structured sink for findings, read by spark-migrate-cli's
- * Analysis/Code-Changes steps. Writing here is a no-op unless the CLI has
+ * Append-only structured sink for findings, read by the caller that runs
+ * these rules. Writing here is a no-op unless the caller has
  * opted in via -Dspark.migrate.findingsSink=<path> (e.g. running under plain
  * `sbt scalafixAll`, scalafix-testkit, or any other ad-hoc use of this jar is
  * unaffected). Deliberately a flat, hand-built JSON line rather than a real
  * codec so this module stays dependency-light -- the schema is intentionally
- * rough for this iteration and expected to be consolidated later.
+ * rough and expected to be consolidated later.
  */
 object FindingsSink {
   private val sinkPath: Option[String] = sys.props.get("spark.migrate.findingsSink")

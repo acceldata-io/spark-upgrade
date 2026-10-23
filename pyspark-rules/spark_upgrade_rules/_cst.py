@@ -1,8 +1,8 @@
 """Shared LibCST helpers for the detectors and the SQL extractor.
 
-Everything here is syntax plus one hop of same-file resolution -- the limit
-PYSPARK.md SS11.7 sets: a name bound exactly once in the module to a literal is
-resolved, nothing else is. No type inference, no cross-file dataflow.
+Everything here is syntax plus one hop of same-file resolution: a name bound
+exactly once in the module to a literal is resolved, nothing else is. No type
+inference, no cross-file dataflow.
 """
 from __future__ import annotations
 

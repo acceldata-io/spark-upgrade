@@ -17,7 +17,7 @@ import scala.meta._
  * Probed on 3.5.5 against 2.4.8: the three shapes that write into a table's
  * existing schema fail, and LEGACY gives 2.4.8's rows exactly --
  *   - `INSERT INTO|OVERWRITE [TABLE] t ...` in embedded SQL (reported by
- *     spark-migrate-cli's shared SQL linter, from `SparkSqlExtract`'s text,
+ *     the embedded-SQL linter, from `SparkSqlExtract`'s text,
  *     so a template is read too -- as the Java recipe leaves it);
  *   - `DataFrameWriter.insertInto`;
  *   - `DataFrameWriter.saveAsTable` in append mode.
@@ -26,9 +26,8 @@ import scala.meta._
  *
  * Whether a given write is hit depends on its column types against the table's,
  * which the rule cannot see; restoring LEGACY is what 2.4 did for every write,
- * which is why this is Tier 2. spark-migrate-cli demotes the finding to Tier 3
- * in a repo that uses Iceberg or Delta: Spark refuses LEGACY for a DataSource
- * V2 write.
+ * which is why this is Tier 2. In a repo that uses Iceberg or Delta it is a
+ * Tier 3 finding instead: Spark refuses LEGACY for a DataSource V2 write.
  *
  * Feeds `spark.sql.storeAssignmentPolicy`.
  */

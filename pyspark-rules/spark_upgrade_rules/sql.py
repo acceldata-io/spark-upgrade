@@ -8,10 +8,9 @@ argument the way the Scala path's SqlInStringDetect does:
   interpolated  an f-string, `"..." % args`, or `"...".format(...)`
   dynamic       anything else -- a variable, a function call, `+` concatenation
 
-The text of each literal goes back to spark-migrate-cli, which lints it with
-the same 13-code sqlfluff allowlist and regex detectors the Scala and Java
-paths use. Interpolated and dynamic SQL cannot be linted; they are reported as
-call sites a person has to read.
+The text of each literal is meant to be linted by the caller, with the same
+sqlfluff rules the Scala and Java paths use. Interpolated and dynamic SQL cannot
+be linted; they are reported as call sites a person has to read.
 
 The matcher is the same `.sql(...)` attribute-call shape PySparkler's own
 PY21-33-001 uses: `spark.sql`, `sqlContext.sql`, `self.spark.sql` alike.
@@ -35,12 +34,12 @@ SQL. A defined statement sqlfluff cannot parse is not reported -- it may be a
 fragment or prose that happens to start like SQL -- so only rules that fire
 on it produce findings.
 
-Codegen rewrites only SQL that reaches Spark (the owner, 2026-10-15). A defined
+Only SQL that reaches Spark is meant to be rewritten. A defined
 statement says whether it does in this module -- `reaches`: it is written in a
 `.sql(...)` argument, or bound once to a name a `.sql(...)` call here uses,
 directly or through `.format`/`%` -- and gives that `name`. A call site whose
 argument is an imported name gives `ref`, the import it resolves to
-(`jobs.queries.DAILY`, `.queries.DAILY`), so the CLI can tell a constant
+(`jobs.queries.DAILY`, `.queries.DAILY`), so a caller can tell a constant
 another module defines reaches Spark.
 
 One helper deep, too: a module-level function that hands one of its parameters
@@ -48,7 +47,7 @@ to `.sql(...)` is a `sink` (`def run(spark, sql): return spark.sql(sql)`), and
 a call that passes a name into it is a `pass` -- `run(spark, DAILY)`,
 `sql_runner.run(spark, QUERIES[name])`. A definition inside a dict or list
 gives the `container` it sits in, so passing `QUERIES[name]` reaches every
-entry of `QUERIES`. The CLI joins sinks, passes and definitions across files.
+entry of `QUERIES`. A caller joins sinks, passes and definitions across files.
 """
 from __future__ import annotations
 
@@ -411,7 +410,7 @@ def extract_sql(module: cst.Module) -> list[dict]:
     # A call site whose SQL was linted where it is defined -- an f-string or a
     # template written in its argument, or a name bound in this file to a
     # statement or to a registry of them -- is `read`, not a call site for a
-    # person. An imported name is resolved by the CLI (`ref`).
+    # person. An imported name is resolved by the caller (`ref`).
     read_nodes = {id(node) for node, _ in sql_definitions(module, consumed)}
     read_names = {d["name"] for d in defined if d["name"]} | {d["container"] for d in defined if d["container"]}
     for site in calls.found:

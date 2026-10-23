@@ -2,15 +2,14 @@
 # the keys RuntimeConfig.set (spark.conf.set) and SQL `SET` reject from 3.0
 # under the default spark.sql.legacy.setCommandRejectsSparkCoreConfs=true.
 #
-# Dumped from a live 3.5.5 session (spark-3.5.5.3.2.3.6-3 binaries) with every
+# Dumped from a live Spark 3.5.5 session with every
 # config holder object loaded -- core's internal.config package and its Deploy,
 # History, Kryo, Network, Python, R, Status, Streaming, Tests, UI and Worker
 # objects, YARN's and Kubernetes' config, StreamingConf, HiveUtils -- by reading
 # ConfigEntry.knownConfigs and dropping SQLConf.containsConfigKey keys. Loaded
 # objects matter: a key is rejected only when its object is loaded, so a local
 # session alone misses the 138 spark.yarn.* / spark.kubernetes.* keys a YARN or
-# Kubernetes driver does load. spark-migrate-cli keeps a copy, and
-# PyRuleRegistryDriftSpec checks the two are identical.
+# Kubernetes driver does load.
 spark.acls.enable
 spark.admin.acls
 spark.admin.acls.groups

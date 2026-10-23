@@ -23,11 +23,11 @@ import java.util.Objects;
  * Java source that compiles on Spark 2.4.8 / JDK 8 and does not on Spark
  * 3.5.5 / JDK 17. The Java twin of the Scalafix {@code CompileBreakDetect}:
  * one table, and one recipe instance per row, so each break has its own id
- * ({@code SparkCompileBreakDetect.<Sub>}) and its own registry text on the CLI
- * side. Detect only (Tier 3): since 2026-10-14 it reports only the sites
+ * ({@code SparkCompileBreakDetect.<Sub>}) that a caller can describe on its
+ * own. Detect only (Tier 3): it reports only the sites
  * {@link SparkCompileBreakRewrite} leaves as written.
  *
- * <p>Every row was probed 2026-10-13: a Maven project compiles each case on
+ * <p>Every row was probed: a Maven project compiles each case on
  * 2.4.8 + JDK 8 and javac rejects it on 3.5.5 + JDK 17; the removed members
  * were checked with javap on both jars. Not included: SparkHadoopUtil (still
  * reachable from Java; its {@code private[spark]} is Scala-only) and
@@ -35,7 +35,7 @@ import java.util.Objects;
  * 3.5.5). The SGD classes are SparkMllibSgdModelUsageDetect's.
  *
  * <p>Methods are matched by resolved type, so they need the 2.4.8 classpath
- * the CLI passes. Types removed outright (InterfaceStability, sun.misc,
+ * passed in. Types removed outright (InterfaceStability, sun.misc,
  * AccumulatorParam) are matched by their fully-qualified name as written,
  * which is the import in practice, so they are found on any classpath.
  */
@@ -181,7 +181,7 @@ public class SparkCompileBreakDetect extends Recipe {
         return sub;
     }
 
-    /** The id the Runner reports and JavaRuleRegistry keys on. */
+    /** The id the Runner reports, and a caller keys on. */
     @Override
     public String getName() {
         return SparkCompileBreakDetect.class.getName() + "." + sub;

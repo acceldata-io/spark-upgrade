@@ -9,9 +9,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 /**
  * Pins {@link Runner#parseHunks} against real {@code Result.diff()} output.
  *
- * <p>Both assertions here are regression tests for bugs found on 2026-09-24
- * by reading an actual {@code analyze} run's {@code findings.json} against
- * {@code fixtures/java-etl-spark2}'s own line numbers, not by reading code:
+ * <p>Both assertions here are regression tests for bugs found by reading an
+ * actual {@code analyze} run's findings against a test project's own line
+ * numbers, not by reading code:
  * every Java finding's reported line was three lines early (the unified-diff
  * context size), and two independent occurrences sharing one hunk collapsed
  * into a single finding. Revert {@code parseHunks} to reporting the hunk

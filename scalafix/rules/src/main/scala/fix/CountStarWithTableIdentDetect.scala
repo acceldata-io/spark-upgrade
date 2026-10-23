@@ -7,7 +7,7 @@ import scala.meta._
 import scala.util.matching.Regex
 
 /**
- * Tier 2 / Class A detector (design review Part 2 Family K / Part 4):
+ * Tier 2 / Class A detector (Family K):
  * `count(tbl.*)` (a single table-qualified star inside `count(...)`) is
  * rejected by Spark 3.0's SQL parser; only bare `count(*)` is allowed.
  * Regex scan over the literal argument of

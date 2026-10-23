@@ -6,7 +6,7 @@ import scalafix.v1._
 import scala.meta._
 
 /**
- * Tier 2 / Class A detector (design review Part 2 Family E / Part 4): a
+ * Tier 2 / Class A detector (Family E): a
  * negative decimal scale (`DecimalType(precision, scale)` with `scale < 0`)
  * is rejected by Spark 3.0's analyzer by default (was silently permissive in
  * 2.4). Narrowed to a literal negative Int scale argument -- the only shape

@@ -6,7 +6,7 @@ import scalafix.v1._
 import scala.meta._
 
 /**
- * Tier 3 detector (design review Part 2 Family C): `UserDefinedAggregateFunction`
+ * Tier 3 detector (Family C): `UserDefinedAggregateFunction`
  * is deprecated in Spark 3.0 in favor of `Aggregator` (the strongly-typed
  * `TypedImperativeAggregate`-based replacement). No mechanical rewrite is
  * attempted -- converting UDAF state/update/merge/evaluate methods into an

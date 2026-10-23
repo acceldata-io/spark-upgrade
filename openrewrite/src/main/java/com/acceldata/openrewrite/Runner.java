@@ -24,20 +24,16 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 /**
- * The purpose-built JVM runner spark-migrate-java-openrewrite-integration-
- * 2026-09-18.md SS2.5/SS8.2 recommended (option 2) and the user's own
- * decision confirmed: invoked by spark-migrate-cli's {@code
- * OpenRewriteRunner} via {@code cs launch -r ivy2Local <coordinate> -M
- * com.acceldata.openrewrite.Runner -- ...}, mirroring exactly how {@code
- * CliScalafixRunner} invokes {@code scalafix-cli}.
+ * A purpose-built JVM runner for these recipes, invoked via {@code cs launch
+ * -r ivy2Local <coordinate> -M com.acceldata.openrewrite.Runner -- ...}, the
+ * same way {@code scalafix-cli} is invoked for the Scala rules.
  *
  * <p>Always dry-run: no write-to-disk API is ever called here. Every recipe
  * requested runs alone against the whole parsed source set, sequentially --
- * deliberately mirroring {@code PhaseARunner}'s "one scalafixAll per Tier 1
- * rule, sequentially, because two rules can collide on the same source span"
- * rationale, even though nothing is written back to disk (codegen wiring is
- * out of scope for this pass; this is Analysis's {@code --check}-equivalent
- * only).
+ * deliberately mirroring the Scala side's "one scalafixAll per Tier 1 rule,
+ * sequentially, because two rules can collide on the same source span"
+ * rationale, even though nothing is written back to disk (the {@code
+ * --check}-equivalent).
  *
  * <p>Args: {@code --repo-root <path>} {@code --files-list <path>} (newline-
  * delimited absolute .java paths) {@code --classpath <path-separator-joined>}
@@ -46,20 +42,18 @@ import java.util.stream.Collectors;
  *
  * <p>{@code analyze} mode is always dry-run: no write-to-disk API is ever
  * called, matching this doc's original contract exactly. {@code fix} mode
- * (added 2026-09-24, for the two Tier 1 recipes {@code codegen} now wires
- * up -- {@code SparkUnionAllRename}/{@code SparkShuffleWriteMetricsRename})
+ * (for the Tier 1 recipes that rewrite, such as {@code SparkUnionAllRename}
+ * and {@code SparkShuffleWriteMetricsRename})
  * additionally writes each recipe's result back to disk, the Java-side
- * equivalent of {@code CliScalafixRunner} running {@code scalafixAll fix}
- * instead of {@code --check}. Both modes emit the same JSONL findings
- * stream either way -- {@code fix} mode's caller (spark-migrate-cli's
- * codegen Phase A) reads it the same way {@code analyze} mode's caller does,
+ * equivalent of running {@code scalafixAll} without {@code --check}. Both modes emit the same JSONL findings
+ * stream either way -- {@code fix} mode's caller reads it the same way
+ * {@code analyze} mode's caller does,
  * so a Tier 1 rewrite that fires during codegen is still a reportable,
  * auditable finding, not a silent mutation.
  *
  * <p>Output is JSONL, one record per line: {@code {"type":"finding", ...}}
- * or {@code {"type":"warning", ...}} -- mirrors {@code
- * PySparklerOutputParser}'s parseError/transformerErrors split, not {@code
- * CliScalafixRunner}'s all-or-nothing exit code. Exit non-zero only for a
+ * or {@code {"type":"warning", ...}} -- a per-file error is a warning
+ * record, not an all-or-nothing exit code. Exit non-zero only for a
  * genuine runner-level failure (bad args, unreadable files-list, zero files
  * after filtering).
  */
@@ -102,9 +96,9 @@ public final class Runner {
             }
 
             // fix mode runs sequentially, each recipe's own output feeding
-            // the next -- mirrors PhaseARunner's "one scalafixAll invocation
+            // the next -- mirrors the Scala side's "one scalafixAll invocation
             // per Tier 1 rule, sequentially, because two rules can collide
-            // on the same source span" rationale, now that this pass wires
+            // on the same source span" rationale, now that this mode makes
             // real writes rather than only dry-run diffs.
             List<SourceFile> current = parsedOk;
             List<Recipe> recipes = RecipeCatalog.resolve(recipesArg);
@@ -160,7 +154,7 @@ public final class Runner {
      * {@code RunnerHunkParsingTest} can assert on it directly. */
     static final class Hunk {
         /** The line in the ORIGINAL file: findings are about the source the
-         * analysis read, and the CLI pairs them with diff hunks by old line. */
+         * analysis read, and a caller pairs them with diff hunks by old line. */
         final int oldStartLine;
         final String snippet;
 
@@ -172,14 +166,12 @@ public final class Runner {
 
     // Standard unified-diff hunk header: "@@ -oldStart,oldLines +newStart,newLines @@[ trailer]".
     // Confirmed against a real spike that Result.diff() produces exactly this
-    // shape, hunk-parseable the same way PySparklerOutputParser already derives
-    // its classification from a real diff rather than trusting a label the
-    // source engine emits.
+    // shape, so a finding's lines come from the real diff rather than from a
+    // label the source engine emits.
     //
     // Returns one entry per contiguous run of CHANGED lines, not one per hunk.
     // Both halves of that matter, and both were real bugs found by reading a
-    // real analyze run's findings.json against the fixture's own line numbers
-    // (2026-09-24):
+    // real analyze run's findings against the test project's own line numbers:
     //
     //  1. The hunk header's `+newStart` is where the hunk BEGINS, which for a
     //     3-line-context diff is three lines above the first line that actually
@@ -198,13 +190,13 @@ public final class Runner {
     // Line accounting is the standard unified-diff rule, on the OLD file's
     // side: context and `-` lines advance the old-file counter, `+` lines do
     // not (they exist only in the new file). Reporting new-file lines put
-    // every finding after an added import a few lines low (2026-10-13). A `\`
+    // every finding after an added import a few lines low. A `\`
     // line ("\ No newline at end of file") is metadata and advances nothing.
     //
     // A block that only adds or removes imports is the side effect of a
     // rewrite elsewhere in the file, not a site of its own, so it is dropped
-    // when the file has another block (2026-10-13: an add_months rewrite was
-    // reported three times, once per import it added).
+    // when the file has another block (otherwise an add_months rewrite is
+    // reported three times, once per import it adds).
     static List<Hunk> parseHunks(String diff) {
         List<Hunk> all = parseBlocks(diff);
         List<Hunk> sites = new ArrayList<>();

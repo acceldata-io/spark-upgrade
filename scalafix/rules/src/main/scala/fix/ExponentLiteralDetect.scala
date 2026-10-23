@@ -7,7 +7,7 @@ import scala.meta._
 import scala.util.matching.Regex
 
 /**
- * Tier 2 / Class A detector (design review Part 2 Family E / Part 4): a
+ * Tier 2 / Class A detector (Family E): a
  * scientific-notation numeric literal (e.g. `1E2`) in SQL text parses as
  * `Double` from Spark 3.0 onward, where 2.4 parsed it as `Decimal`. Regex
  * scan over the literal argument of `spark.sql(...)`/`sqlContext.sql(...)`

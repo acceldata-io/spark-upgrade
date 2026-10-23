@@ -35,7 +35,7 @@ class ShuffleWriteMetricsRenameDetect extends SemanticRule("ShuffleWriteMetricsR
   // Matched on the `Term.Name` specifically, not on any enclosing Term.Select /
   // Term.Apply: a SymbolMatcher happily matches all three layers of the same
   // call, which is exactly why GroupByKeyWarn reports one position two or three
-  // times (2026-08-17 review SS4.2). Narrowing to the name both fixes the
+  // times. Narrowing to the name both fixes the
   // duplicate reporting and gives Patch.replaceTree the smallest correct span.
   override def fix(implicit doc: SemanticDocument): Patch = {
     doc.tree.collect {

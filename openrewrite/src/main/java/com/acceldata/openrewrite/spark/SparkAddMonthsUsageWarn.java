@@ -14,7 +14,7 @@ import org.openrewrite.marker.SearchResult;
  * the last day of its month -- e.g. {@code add_months('2019-02-28', 1)} returns
  * {@code 2019-03-28} now, not {@code 2019-03-31}. The {@code (Column, int)}
  * overload was confirmed present via {@code javap} against the real {@code
- * spark-sql_2.11-2.4.8.jar} (2026-09-29).
+ * spark-sql_2.11-2.4.8.jar}.
  *
  * <p>Reports only the calls {@link SparkAddMonthsRewrite} does not rewrite
  * (an argument that is not safe to evaluate twice, or a result whose

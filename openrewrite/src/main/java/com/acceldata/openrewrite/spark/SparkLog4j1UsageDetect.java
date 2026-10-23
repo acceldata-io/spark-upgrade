@@ -8,9 +8,9 @@ import org.openrewrite.java.tree.J;
 import org.openrewrite.marker.SearchResult;
 
 /**
- * Java-side rule closing a 2026-09-29 coverage-review gap against the core
+ * Java-side rule closing a coverage gap against the core
  * migration guide: Spark switched its own logging from Log4j 1.x to Log4j
- * 2.x in Spark 3.3 (Log4j 1.x reached end-of-life). A customer's own {@code
+ * 2.x in Spark 3.3 (Log4j 1.x reached end-of-life). An application's own {@code
  * org.apache.log4j.*} usage (a very common direct-logging pattern in
  * pre-3.3 Java Spark apps) needs its own migration to the Log4j 2 API, and
  * any {@code log4j.properties} file needs rewriting to Log4j 2 syntax.

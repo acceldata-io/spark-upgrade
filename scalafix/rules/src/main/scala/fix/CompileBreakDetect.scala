@@ -16,7 +16,7 @@ import scala.meta._
  * `CompileBreakDetect.<Sub>.Manual` (Tier 3) and left as written. Rows
  * without a rewrite stay Tier 3 (their own registry entries).
  *
- * Every entry was probed 2026-10-13: a tiny sbt project compiles on 2.11.12 +
+ * Every entry was probed: a tiny sbt project compiles on 2.11.12 +
  * 2.4.8 + JDK 8 and the same source fails on 2.12.18 + 3.5.5 + JDK 17 with
  * the error quoted in the entry's text; the removed members were checked with
  * javap on both jars. Not included because they still compile: mllib
@@ -24,7 +24,7 @@ import scala.meta._
  * passed to foreachPartition/foreachBatch, Dataset.foreach with an untyped
  * lambda. SVMWithSGD keeps its train methods.
  *
- * The rewrites, probed 2026-10-14 (2.4.8 sources and javap, then the old call
+ * The rewrites, probed (2.4.8 sources and javap, then the old call
  * on 2.4.8 against the new one on 3.5.5):
  *  - an untyped lambda's parameters get the types Scala 2.11 inferred
  *    (SemanticDB), so 2.12 picks the same Scala overload; `f(_)` becomes `f _`.
@@ -97,8 +97,8 @@ class CompileBreakDetect extends SemanticRule("CompileBreakDetect") {
     case _ => false
   }
 
-  /** A typed lambda (`(batch: DataFrame, id: Long) => ...`) whose body ends in a call returning a value: the
-   *  2026-10-19 user trial's `batch.unpersist()`. An untyped one is `ForeachBatchLambda`'s. */
+  /** A typed lambda (`(batch: DataFrame, id: Long) => ...`) whose body ends in a call returning a value, such
+   *  as `batch.unpersist()`. An untyped one is `ForeachBatchLambda`'s. */
   private def endsInValue(n: Term.Name)(implicit doc: SemanticDocument): Boolean =
     typedFunction(n).flatMap(f => lastStat(f.body)).exists {
       case t @ (_: Term.Apply | _: Term.Select | _: Term.Name) => returnsValue(t)

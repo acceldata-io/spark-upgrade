@@ -15,20 +15,18 @@ import org.openrewrite.marker.SearchResult;
  *
  * <p>Deliberately targets the {@code Column...} varargs overloads, not the
  * {@code scala.collection.Seq}-based ones -- verified via {@code javap}
- * against the real {@code spark-sql_2.11-2.4.8.jar} (2026-09-21) that {@code
+ * against the real {@code spark-sql_2.11-2.4.8.jar} that {@code
  * array}/{@code map} have a Java-friendly {@code Column...} overload while
  * {@code grouping_id} does not (only {@code Seq}-typed overloads exist),
  * which is why {@code grouping_id} was dropped from this initial set rather
  * than built on an assumption -- the same "verify Java-reachability before
- * writing" discipline the integration doc's SS1.2/SS9 already flagged for UDF
- * registration. A zero-argument varargs call parses as a single {@code
- * J.Empty} argument, confirmed against a real spike this session.
+ * writing" discipline that applies to UDF registration too. A zero-argument varargs call parses as a single {@code
+ * J.Empty} argument, confirmed against a real spike.
  *
  * <p>Reports the calls {@link SparkEmptyCollectionTypeRewrite} does not
  * rewrite, those whose generated column name survives. Feeds {@code
  * spark.sql.legacy.createEmptyCollectionUsingStringType} -- Tier 2, cross-linked
- * into the {@code LegacyConfigRegistry} entry's {@code detectionRuleIds} so
- * Phase B (spark-migrate-cli's {@code PhaseBRunner}) injects it.
+ * to that config so a caller can inject it.
  */
 public class SparkEmptyCollectionTypeDetect extends Recipe {
 

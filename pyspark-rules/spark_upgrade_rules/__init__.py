@@ -1,6 +1,6 @@
 """Our own PySpark migration rules, run beside the vendored PySparkler.
 
-The contract with spark-migrate-cli's bridge script:
+The contract with a caller that runs these rules:
 
   transformers()           PySparkler-style transformers, merged with its own (none)
   detector_ids()           ids of every rule below
@@ -10,8 +10,8 @@ The contract with spark-migrate-cli's bridge script:
   fix(module, fix_ids)     codegen: those rewrites applied, chained, to one file
   extract_sql(module)      every `.sql(...)` call site, for the JVM-side SQL lint
 
-The bridge runs only the ids spark-migrate-cli's PyRuleRegistry names. See
-README.md for the conventions.
+A caller can pass any subset of the ids, so it can run only the rules it knows.
+See README.md for the conventions.
 """
 from __future__ import annotations
 
@@ -63,7 +63,7 @@ from spark_upgrade_rules.star_import_rules import StarImportShadowsFilter
 
 __all__ = ["detect", "detector_ids", "extract_sql", "fix", "fixer_ids", "transformers"]
 
-# Ports of the Scala detectors (PYSPARK.md SS11.8), by family, then the PySpark-only rules.
+# Ports of the Scala detectors, by family, then the PySpark-only rules.
 DETECTORS = [
     # D -- datetime
     DateTimeFormatPatternValidator,
@@ -110,7 +110,7 @@ DETECTORS = [
     PandasOnSparkDropAxis,
     PandasOnSparkSqlFormatter,
     MlSharedParamSetters,
-    # The PySpark guide's own 3.3 -> 3.4 changes (PYSPARK.md G14): core...
+    # The PySpark guide's own 3.3 -> 3.4 changes: core...
     ArrayTypeSchemaInference,
     NamedtupleCloudpickle,
     # ...and pandas API on Spark, run only in a repo that uses it.

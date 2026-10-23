@@ -188,7 +188,7 @@ class ExtractSqlTest(unittest.TestCase):
             ("interpolated", True, None),
             ("dynamic", True, None),  # a name's .format: dynamic, but its template was read
             ("dynamic", True, None),
-            ("dynamic", False, "jobs.queries.DAILY"),  # the CLI resolves the import
+            ("dynamic", False, "jobs.queries.DAILY"),  # the caller resolves the import
             ("dynamic", False, None),  # a parameter: SQL built at run time
         ])
         self.assertTrue(all("_ids" not in f and "_name" not in f for f in found))

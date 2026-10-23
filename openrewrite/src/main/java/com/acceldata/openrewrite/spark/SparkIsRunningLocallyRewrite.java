@@ -13,7 +13,7 @@ import org.openrewrite.java.tree.J;
 /**
  * {@code TaskContext.isRunningLocally()} is removed in Spark 3.0. In 2.4.8 it
  * already returned a constant: {@code TaskContextImpl.isRunningLocally} is
- * {@code iconst_0; ireturn} ({@code javap -c}, 2026-10-13), and {@code
+ * {@code iconst_0; ireturn} ({@code javap -c}), and {@code
  * BarrierTaskContext} delegates to it. So the call becomes the literal
  * {@code false}, which is exact when evaluating the receiver has no side
  * effects: {@code TaskContext.get()}, a variable, or a field.

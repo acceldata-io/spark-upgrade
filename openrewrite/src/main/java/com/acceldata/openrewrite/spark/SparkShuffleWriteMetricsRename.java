@@ -11,13 +11,12 @@ import java.util.List;
  * rule: three deprecated {@code ShuffleWriteMetrics} accessors were removed in
  * Spark 3.0, each in favor of an exactly-equivalent shorter name. All six
  * method names (three old, three new) verified present in the real {@code
- * spark-core_2.11-2.4.8.jar} via {@code javap} (2026-09-21) -- same bytecode a
+ * spark-core_2.11-2.4.8.jar} via {@code javap} -- same bytecode a
  * Java caller hits identically, so this rewrite is valid pre-migration too.
  *
- * <p>Promoted to Tier 1 (2026-09-24 session): delegates to three {@link
+ * <p>Promoted to Tier 1: delegates to three {@link
  * ChangeMethodName} instances instead of a hand-rolled visitor, for the same
- * type-attribution reason {@code SparkUnionAllRename} was retrofitted
- * (code review 2026-09-24 SS4.6).
+ * type-attribution reason {@code SparkUnionAllRename} was retrofitted.
  */
 public class SparkShuffleWriteMetricsRename extends Recipe {
 

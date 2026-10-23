@@ -21,7 +21,7 @@ import java.util.Map;
  * removed in Spark 3.x in favor of the typed accumulator API
  * ({@code longAccumulator}/{@code doubleAccumulator} on {@code SparkContext}
  * itself, or a custom {@code AccumulatorV2}). Verified via {@code javap}
- * against the real {@code spark-core_2.11-2.4.8.jar} (2026-09-24) that every
+ * against the real {@code spark-core_2.11-2.4.8.jar} that every
  * matcher below resolves on {@code JavaSparkContext}.
  *
  * <p>Reports the calls {@link SparkAccumulatorV1Rewrite} does not rewrite: a

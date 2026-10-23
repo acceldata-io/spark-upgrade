@@ -2,8 +2,7 @@
 
 2.4.8's `pyspark.sql.functions` had an `__all__`; 3.5.5's has none, so its
 star import binds every public module global: 255 names 2.4.8's did not
-(listed below, from a live import of each in docker -- spark-migrate-cli
-docs/triage-2026-10-13/api-pyspark.md). Three kinds of 2.4 code change meaning:
+(listed below, from a live import of each). Three kinds of 2.4 code change meaning:
 
   - A Python builtin the star import now shadows: only `filter`. The other
     builtins it binds (`abs`, `max`, `min`, `round`, `sum`, ...) 2.4.8 already
@@ -32,7 +31,7 @@ from spark_upgrade_rules import _cst
 from spark_upgrade_rules.detector import Fixer
 
 # `from pyspark.sql.functions import *` on 3.5.5 minus the same on 2.4.8, each
-# run in its docker image. (2.4.8's `basestring` is the one name it lost.)
+# run on that version. (2.4.8's `basestring` is the one name it lost.)
 NEW_STAR_NAMES = frozenset("""
 Any ArrayType Callable Column DataFrame DataType Dict Iterable JVMView List Optional PySparkTypeError PySparkValueError
 SparkContext StringType StructType TYPE_CHECKING Tuple Type Union UserDefinedFunction UserDefinedTableFunction ValuesView
