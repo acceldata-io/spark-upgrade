@@ -1,5 +1,5 @@
 """Koalas -> pandas API on Spark, and the two pandas-on-Spark changes the port
-makes reachable (spark-migrate-cli PYSPARK.md SS2.7).
+makes reachable.
 
 A 2.4 repo's pandas-on-Spark is Koalas, which supports Spark 3.1 and below;
 Spark 3.2 took the same code in-tree as `pyspark.pandas`. The port is the
@@ -209,7 +209,7 @@ def _walk(node: cst.CSTNode):
 
 class PandasOnSparkDropAxis(Provenance, Fixer):
     """Supersedes PySparkler's PY32-33-001, which matched every `.drop(x)` --
-    100% false positives on plain Spark (PYSPARK.md SS2.3)."""
+    100% false positives on plain Spark."""
 
     rule_id = "PandasOnSparkDropAxis"
 

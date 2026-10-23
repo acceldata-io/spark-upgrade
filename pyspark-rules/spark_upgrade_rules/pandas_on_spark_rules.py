@@ -1,7 +1,6 @@
-"""The PySpark guide's 3.3 -> 3.4 pandas-on-Spark changes (spark-migrate-cli
-PYSPARK.md G14). spark-migrate-cli runs these only when the repo uses pandas API
-on Spark -- `pyspark.pandas`, or Koalas, which a 2.4 repo uses and which has to
-be ported to it (PandasOnSparkGate, `requiresPandasOnSpark`).
+"""The PySpark guide's 3.3 -> 3.4 pandas-on-Spark changes. They are meant to
+run only when the repo uses pandas API on Spark -- `pyspark.pandas`, or Koalas,
+which a 2.4 repo uses and which has to be ported to it (PandasOnSparkGate, `requiresPandasOnSpark`).
 
 Inside such a repo plain pandas is usually in use too, and shares every method
 name here, so each rule also asks where the frame came from: a `ps.`/`ks.`
@@ -9,7 +8,7 @@ call or `.pandas_api()`/`.to_koalas()` is pandas-on-Spark (medium); `pd.` or
 `.toPandas()` is plain pandas, and is skipped; anything else is unknown (low).
 One hop through a name assigned in the same function or module, as everywhere.
 
-Probed on PySpark 3.5.5 with pandas 2.0 (PYSPARK.md SS8.13): each "now"
+Probed on PySpark 3.5.5 with pandas 2.0: each "now"
 behaviour below is what 3.5.5 does.
 """
 from __future__ import annotations

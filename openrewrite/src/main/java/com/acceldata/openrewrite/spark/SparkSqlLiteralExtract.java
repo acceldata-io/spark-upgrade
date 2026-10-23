@@ -22,9 +22,8 @@ import org.openrewrite.marker.SearchResult;
 
 /**
  * Not a migration-guide finding on its own -- a plumbing recipe that feeds
- * spark-migrate-cli's Java-side embedded-SQL (Family K) pipeline
- * ({@code JavaSqlLiteralAnalyzer.scala}), the Java counterpart to the Scalafix
- * rule {@code SparkSqlExtract}.
+ * a caller's Java-side embedded-SQL (Family K) lint, the Java counterpart to
+ * the Scalafix rule {@code SparkSqlExtract}.
  *
  * <p>It marks the argument of every {@code SparkSession#sql}/{@code SQLContext#sql}
  * call with a {@code SearchResult} whose description carries the SQL text, so
@@ -96,8 +95,8 @@ public class SparkSqlLiteralExtract extends Recipe {
             private final Map<String, Expression> initialisers = new HashMap<>();
             private final Set<String> reassigned = new HashSet<>();
             // `for (String q : DDL) spark.sql(q);` over statements this file spells out: each statement is
-            // marked where it is written, and the loop variable's call is not dynamic (the 2026-10-19 user
-            // trial: a CHAR(2) column in a list of DDL strings was never linted).
+            // marked where it is written, and the loop variable's call is not dynamic (otherwise a
+            // CHAR(2) column in a list of DDL strings is never linted).
             private final Set<java.util.UUID> loopCalls = new HashSet<>();
             private final Set<java.util.UUID> statements = new HashSet<>();
 

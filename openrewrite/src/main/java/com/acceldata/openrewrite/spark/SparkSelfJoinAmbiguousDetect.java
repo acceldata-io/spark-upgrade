@@ -21,7 +21,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * differently-named variables are never flagged; an aliased reference to the
  * same Dataset is not caught).
  *
- * <p>Narrowed (2026-10-15) like the Scala rule, by a probe on 2.4.8 and
+ * <p>Narrowed like the Scala rule, by a probe on 2.4.8 and
  * 3.5.5: what fails is a column referenced through the frame --
  * {@code df.col("n").gt(df.col("n"))} in the condition, or
  * {@code .select(df.col("v"))} after the join. A join on a column name

@@ -49,7 +49,7 @@ object SelfJoinAmbiguousColumnDetectExample {
     df.join(df, "id").drop(df("v")).select(col("id"))
   }
 
-  // Two different frames, each aliased: both sides are `.as(...)` calls, one method symbol (the 2026-10-19 user trial).
+  // Two different frames, each aliased: both sides are `.as(...)` calls, one method symbol.
   def aliasedOthers(spark: SparkSession): Unit = {
     val conv = spark.read.format("parquet").load("/data/a")
     val eligible = spark.read.format("parquet").load("/data/b")

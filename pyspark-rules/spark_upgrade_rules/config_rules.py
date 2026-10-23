@@ -50,7 +50,7 @@ class SetCommandSparkConfDetect(Detector):
 
 
 # SQL configs 2.4 read that 3.5.5 does not. Read off the real 3.5.5 SQLConf
-# against 2.4.8's SQLConf.scala (spark-migrate-cli PYSPARK.md SS8.14): the
+# against 2.4.8's SQLConf.scala: the
 # first group is in SQLConf.removedSQLConfigs, which makes Spark throw when the
 # key is set to anything but the default given here -- and through the session
 # builder, the session cannot be created at all (probed). The second group is

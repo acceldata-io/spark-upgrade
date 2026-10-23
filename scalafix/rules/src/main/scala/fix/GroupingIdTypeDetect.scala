@@ -6,7 +6,7 @@ import scalafix.v1._
 import scala.meta._
 
 /**
- * Tier 2 / Class A detector (design review Part 2 Family G / Part 4):
+ * Tier 2 / Class A detector (Family G):
  * `grouping_id()` returns `Long` from Spark 3.0 onward, not `Int`. Reliably
  * telling whether a specific call site's result is later type-matched/
  * compared/stored as `Int` needs data-flow analysis this rule doesn't do --

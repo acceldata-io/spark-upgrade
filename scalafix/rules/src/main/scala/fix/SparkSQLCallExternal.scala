@@ -16,7 +16,7 @@ object SparkSQLCallExternal {
    * plugin, so if the binary isn't on PATH this rule contributes ZERO findings
    * -- and, before this, said nothing about it: `Try(...).toOption` swallowed
    * the process-launch failure, `stillFlagged` came back empty, and
-   * findings.json/report.html looked exactly like a repo whose SQL was clean.
+   * the findings looked exactly like a repo whose SQL was clean.
    * Silently reporting "no SQL issues" for a repo nobody actually checked is
    * the worst failure mode an effort-estimation tool has, so the unavailable
    * case now produces its own finding.
@@ -37,7 +37,7 @@ object SparkSQLCallExternal {
 
   val ruleCodes: String = pluginRuleCodes.toSeq.sorted.mkString(",")
 
-  /** The fixers whose rewrite gives exactly 2.4's result (SQL.md SS4). The
+  /** The fixers whose rewrite gives exactly 2.4's result. The
    * others are reported but never applied: SPARKSQLCAST_L001's rewrite is a
    * no-op, NOCHARS_L003's also rewrites Hive DDL, and RESERVEDROPERTIES_L002's
    * can produce SQL Spark rejects -- those two are restored by config instead. */
@@ -57,14 +57,14 @@ object SparkSQLCallExternal {
    *      value for 'disable_progress_bar'` under click >= 8.2, during
    *      argument parsing -- so `--version` is fine and every `lint`/`fix`
    *      dies with a traceback and exit 1, which is indistinguishable by exit
-   *      code from the normal "found violations" case. Reproduced 2026-09-24
-   *      in the venv PROJECT-GUIDE.md SS0.4 step 3b tells you to build:
+   *      code from the normal "found violations" case. Reproduced in a venv
+   *      with both installed:
    *      installing `pysparkler` alongside the plugin resolves click 8.5.0,
    *      while a plugin-only venv resolves 8.1.8 and works. The tool then
    *      reported a Family K-heavy fixture as having zero SQL findings, and
    *      `analyze` said SUCCESS.
    *   2. **`sqlfluff` runs but the plugin is missing or stale.** PyPI's
-   *      published plugin ships only 6 of these codes (same SS0.4 note);
+   *      published plugin ships only 6 of these codes;
    *      an unregistered code is a `WARNING Tried to allowlist unknown rule
    *      references: [...]` line, not an error, so the run finishes clean.
    *
@@ -108,8 +108,8 @@ class SparkSQLCallExternal extends SemanticRule("SparkSQLCallExternal") {
 
   // Explicit allowlist rather than plain `sqlfluff fix`/`sqlfluff lint` with
   // no `--rules`: unrestricted, sqlfluff also applies/reports its own generic
-  // SQL style rules, which would get misattributed to a Spark migration fix
-  // (gap-analysis 2026-08-21 SS3.4). The list itself lives on the companion
+  // SQL style rules, which would get misattributed to a Spark migration fix.
+  // The list itself lives on the companion
   // so the availability probe can use the same one.
   private val pluginRuleCodes: Set[String] = SparkSQLCallExternal.pluginRuleCodes
 
@@ -182,7 +182,7 @@ class SparkSQLCallExternal extends SemanticRule("SparkSQLCallExternal") {
     // The fixed SQL is kept only when the literal is fixed WHOLE: a lint of
     // the result shows none of the audited fix codes, no code the original
     // did not have, and no parse error -- the same acceptance test as the
-    // CLI's SqlLiteralLinter.lintAndPlan. The plugin offers no fix where the
+    // linter applies to embedded SQL in Java and PySpark. The plugin offers no fix where the
     // auto-generated column name would change (an unaliased SELECT item), so
     // such a site stays flagged, the literal is left as written, and its
     // codes are reported as `<CODE>.Manual` (Tier 3) rather than as done.
@@ -288,9 +288,9 @@ class SparkSQLCallExternal extends SemanticRule("SparkSQLCallExternal") {
                   // their own legacy config (CTEPRECEDENCE_L010 ->
                   // spark.sql.legacy.ctePrecedencePolicy,
                   // RESERVEDROPERTIES_L002 -> ...notReserveProperties), and the
-                  // orchestrator maps a config to a RULE ID -- so with one
-                  // shared id it could neither tell which change was found nor
-                  // key a config off it. See the 2026-08-22 review SS6.3.2.
+                  // config is keyed off a RULE ID -- so with one shared id
+                  // neither which change was found nor its config could be
+                  // told apart.
                   //
                   // An audited fix code is Tier 1 (`SparkSQLCallExternal.<CODE>`)
                   // only when this literal really was rewritten; otherwise it is

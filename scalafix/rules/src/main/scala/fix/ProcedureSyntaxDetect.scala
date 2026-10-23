@@ -7,12 +7,11 @@ import scala.meta._
 import scala.meta.tokens.Token
 
 /**
- * Not a Spark API change -- a Scala 2.11 -> 2.12 SOURCE break (code review
- * 2026-08-22 §8.2). Procedure syntax (`def f() { ... }`, no `=`) compiles on 2.12 without a
- * warning, even with -deprecation (probed); 2.13 deprecates it and Scala 3 drops it. The rewrite
- * is the explicit form, which compiles on every version.
- * `VersionRegistry`/`DepUpgrade.ScalaVersionOutdated` bump `scalaVersion` to
- * 2.12 (Tier 1, auto-applied) but nothing in this tool detects or fixes the
+ * Not a Spark API change -- a Scala 2.11 -> 2.12 SOURCE break. Procedure syntax
+ * (`def f() { ... }`, no `=`) compiles on 2.12 without a warning, even with
+ * -deprecation (probed); 2.13 deprecates it and Scala 3 drops it. The rewrite
+ * is the explicit form, which compiles on every version. A migration bumps
+ * `scalaVersion` to 2.12, but nothing in these rules detected or fixed the
  * source-level fallout of that bump -- this is the first rule to close that
  * gap.
  *

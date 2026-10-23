@@ -26,7 +26,7 @@ import java.util.Set;
  *   when(to_date(d).equalTo(last_day(d)), last_day(add_months(d, n))).otherwise(add_months(d, n))
  * </pre>
  * gives 2.4.8's values on 3.5.5 for dates, timestamps, date strings, Feb 29
- * and null (probed in Docker, 2026-10-13). Every function in it exists in both
+ * and null (probed). Every function in it exists in both
  * 2.4.8 and 3.5.5. Only {@code add_months(Column, int)} needs matching: it is
  * the one overload 2.4.8 has, so it is the only one 2.4 source can call.
  *

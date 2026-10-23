@@ -6,13 +6,13 @@ import scalafix.v1._
 import scala.meta._
 
 /**
- * Tier 3 detector (design review Part 2 Family H): a CSV read under
+ * Tier 3 detector (Family H): a CSV read under
  * `multiLine=true` with no explicit `encoding` no longer picks the charset
  * up from a UTF-16/UTF-32 byte-order mark in Spark 3.x, so such a file is
  * misread. A UTF-8 BOM is still skipped, so UTF-8 files are unaffected.
  * No legacy config restores the old detection, so this is
  * detect-only -- narrowed to the unambiguous, purely syntactic case design
- * review Part 2 Family H calls "statically detectable": a `.csv(...)`
+ * what counts as "statically detectable": a `.csv(...)`
  * read call whose receiver chain sets `multiLine` to a literal `true` but
  * never sets an explicit `encoding` option, mirroring
  * `PathOptionConflictDetect`'s same chain-walking approach to the same class

@@ -7,8 +7,8 @@ import org.apache.spark.sql.{DataFrame, SaveMode, SparkSession}
 
 object StoreAssignmentPolicyDetectExample {
   def run(spark: SparkSession, df: DataFrame, mode: String): Unit = {
-    spark.sql("INSERT INTO billing.usage SELECT msisdn, date_format(ts, 'yyyy-MM-dd') FROM cdr") // the CLI's SQL linter reports it
-    spark.sql("INSERT OVERWRITE TABLE billing.usage PARTITION (d = '2024-01-15') SELECT * FROM cdr") // the CLI's SQL linter reports it
+    spark.sql("INSERT INTO billing.usage SELECT msisdn, date_format(ts, 'yyyy-MM-dd') FROM cdr") // the embedded-SQL linter reports it
+    spark.sql("INSERT OVERWRITE TABLE billing.usage PARTITION (d = '2024-01-15') SELECT * FROM cdr") // the embedded-SQL linter reports it
     df.write.insertInto("billing.usage") // assert: StoreAssignmentPolicyDetect
     df.write.mode("append").saveAsTable("billing.usage") // assert: StoreAssignmentPolicyDetect
     df.write.mode(SaveMode.Append).format("parquet").saveAsTable("billing.usage") // assert: StoreAssignmentPolicyDetect

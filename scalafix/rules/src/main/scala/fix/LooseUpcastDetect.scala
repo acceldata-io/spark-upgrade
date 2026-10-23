@@ -6,7 +6,7 @@ import scalafix.v1._
 import scala.meta._
 
 /**
- * Tier 2 / Class A detector (design review Part 2 Family E / Part 4):
+ * Tier 2 / Class A detector (Family E):
  * `Dataset.as[T]` performs an "up-cast" that Spark 3.0 validates much more
  * strictly at analysis time (e.g. `Seq("str").toDS.as[Boolean]` now fails
  * outright instead of silently coercing). Fully verifying whether a given
@@ -32,7 +32,7 @@ import scala.meta._
  * extraction. Fixed to additionally require the resolved symbol to be
  * `Dataset.as`.
  *
- * `.as[String]` is NOT exempted, though the 2026-10-15 review listed it as
+ * `.as[String]` is NOT exempted, though it can look like
  * noise: probed on 2.4.8 and 3.5.5, it gives the same values for every atomic
  * column (int, long, double, decimal, boolean, date, timestamp, binary,
  * string, null), but an array, struct or map column `.as[String]` worked on

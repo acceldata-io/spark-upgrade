@@ -37,7 +37,7 @@ import java.util.Set;
  * left as written and reported by the detect row of the same name; {@link
  * #handles} is the shared test.
  *
- * <p>Probed 2026-10-14 (2.4.8 sources and javap; the old call on 2.4.8 / JDK 8
+ * <p>Probed (2.4.8 sources and javap; the old call on 2.4.8 / JDK 8
  * against the new one on 3.5.5 / JDK 17):
  * <ul>
  * <li>MulticlassMetrics precision()/recall()/fMeasure() -> accuracy(): 2.4.8

@@ -55,17 +55,15 @@ import java.util.Map;
  * Resolves a recipe-id list (or {@code "all"}) to real {@link Recipe}
  * instances -- our four hand-written recipes via direct {@code new}, plus
  * the vendored JDK-migration bundle via {@link Environment#scanRuntimeClasspath()}
- * + {@code activateRecipes(...)} (spark-migrate-java-openrewrite-integration-
- * 2026-09-18.md SS8.3's decision to bundle the JDK 8/11->17 axis alongside the
- * Spark axis this iteration; the resolution path itself confirmed against a
+ * + {@code activateRecipes(...)} (the JDK 8/11->17 axis is bundled alongside
+ * the Spark axis; the resolution path itself confirmed against a
  * real spike, not assumed from docs -- resolving cleanly as a plain
  * dependency, no {@code rewrite-maven-plugin} needed).
  *
  * <p>Recipe ids are the fully-qualified class name for our own recipes (the
  * same convention OpenRewrite itself uses for Java-authored recipes) and
- * OpenRewrite's own id verbatim for the vendored one -- {@code
- * JavaRuleRegistry} on the spark-migrate-cli side keys off these exact
- * strings, the same way {@code PyRuleRegistry} keys off PySparkler's own
+ * OpenRewrite's own id verbatim for the vendored one -- a caller keys off
+ * these exact strings, the same way it would key off PySparkler's own
  * {@code transformer_id}s verbatim.
  */
 public final class RecipeCatalog {
@@ -120,12 +118,12 @@ public final class RecipeCatalog {
 
     private static Map<String, Recipe> handWritten() {
         Map<String, Recipe> byId = new LinkedHashMap<>();
-        // Tier 1 (2026-09-24): exact, type-attribution-safe renames, wired
+        // Tier 1: exact, type-attribution-safe renames, wired
         // into codegen's fix mode.
         byId.put(SparkUnionAllRename.class.getName(), new SparkUnionAllRename());
         byId.put(SparkShuffleWriteMetricsRename.class.getName(), new SparkShuffleWriteMetricsRename());
-        // Everything else: Tier 3, detect-only (JavaRuleRegistry is the
-        // authority on tier; this list is just "what exists").
+        // Everything else: Tier 3, detect-only (the caller is the authority
+        // on tier; this list is just "what exists").
         byId.put(SparkPathOptionConflictDetect.class.getName(), new SparkPathOptionConflictDetect());
         byId.put(SparkEmptyCollectionTypeDetect.class.getName(), new SparkEmptyCollectionTypeDetect());
         byId.put(SparkAccumulatorV1Detect.class.getName(), new SparkAccumulatorV1Detect());
@@ -145,8 +143,8 @@ public final class RecipeCatalog {
         byId.put(SparkSaveAsTablePathDetect.class.getName(), new SparkSaveAsTablePathDetect());
         byId.put(SparkCalendarIntervalUsageDetect.class.getName(), new SparkCalendarIntervalUsageDetect());
         byId.put(SparkInvalidTimeZoneIdDetect.class.getName(), new SparkInvalidTimeZoneIdDetect());
-        // 2026-09-29 coverage review batch -- all Tier 3, detect-only, per
-        // this session's policy for every new rule (see each class's own
+        // A coverage batch -- all Tier 3, detect-only, as every new rule
+        // starts (see each class's own
         // doc comment for the migration-guide item and javap verification).
         byId.put(SparkAccumulableInfoConstructionDetect.class.getName(), new SparkAccumulableInfoConstructionDetect());
         byId.put(SparkAnalysisExceptionPlanUsageDetect.class.getName(), new SparkAnalysisExceptionPlanUsageDetect());
@@ -154,10 +152,10 @@ public final class RecipeCatalog {
         byId.put(SparkDuplicateMapKeyLiteralDetect.class.getName(), new SparkDuplicateMapKeyLiteralDetect());
         byId.put(SparkMapTypeKeyInCreateMapDetect.class.getName(), new SparkMapTypeKeyInCreateMapDetect());
         byId.put(SparkAddMonthsUsageWarn.class.getName(), new SparkAddMonthsUsageWarn());
-        // 2026-10-13: the exact rewrite for the add_months calls it can prove
+        // The exact rewrite for the add_months calls it can prove
         // safe; SparkAddMonthsUsageWarn reports the rest.
         byId.put(SparkAddMonthsRewrite.class.getName(), new SparkAddMonthsRewrite());
-        // 2026-10-13 triage: exact rewrites for the sites each one can prove,
+        // Exact rewrites for the sites each one can prove,
         // split from a detect recipe that reports the rest (except the rename,
         // whose detect reports only an import whose type did not resolve).
         byId.put(SparkIsRunningLocallyRewrite.class.getName(), new SparkIsRunningLocallyRewrite());
@@ -165,7 +163,7 @@ public final class RecipeCatalog {
         byId.put(SparkPathOptionConflictRewrite.class.getName(), new SparkPathOptionConflictRewrite());
         byId.put(SparkOneHotEncoderEstimatorRename.class.getName(), new SparkOneHotEncoderEstimatorRename());
         byId.put(SparkCalendarIntervalConstructorRewrite.class.getName(), new SparkCalendarIntervalConstructorRewrite());
-        // 2026-10-16 (the user trial): the v1 accumulator in its common shape;
+        // The v1 accumulator in its common shape;
         // SparkAccumulatorV1Detect reports the rest.
         byId.put(SparkAccumulatorV1Rewrite.class.getName(), new SparkAccumulatorV1Rewrite());
         byId.put(SparkDateTimeFormatPatternDetect.class.getName(), new SparkDateTimeFormatPatternDetect());
@@ -173,20 +171,19 @@ public final class RecipeCatalog {
         byId.put(SparkLog4j1UsageDetect.class.getName(), new SparkLog4j1UsageDetect());
         byId.put(SparkOneHotEncoderEstimatorUsageDetect.class.getName(), new SparkOneHotEncoderEstimatorUsageDetect());
         byId.put(SparkMllibSgdModelUsageDetect.class.getName(), new SparkMllibSgdModelUsageDetect());
-        // 2026-10-13: Spark 3.5.5 / JDK 17 compile breaks, one recipe per
+        // Spark 3.5.5 / JDK 17 compile breaks, one recipe per
         // table row, each under its own SparkCompileBreakDetect.<Sub> id.
         for (SparkCompileBreakDetect recipe : SparkCompileBreakDetect.all()) {
             byId.put(recipe.getName(), recipe);
         }
-        // 2026-10-14: the exact 3.5.5 form of the rows that have one
+        // The exact 3.5.5 form of the rows that have one
         // (SparkCompileBreakRewrite.<Sub>); the detect rows report the rest.
         for (SparkCompileBreakRewrite recipe : SparkCompileBreakRewrite.all()) {
             byId.put(recipe.getName(), recipe);
         }
         // Plumbing, not a migration finding of its own -- see its own doc
-        // comment. JavaRuleRegistry does not carry an entry for this id;
-        // JavaAnalysisRunner filters it out of the findings stream before
-        // JavaRuleRegistry ever sees it.
+        // comment. A caller reads its findings as SQL text to lint, not as
+        // findings to report.
         byId.put(SparkSqlLiteralExtract.class.getName(), new SparkSqlLiteralExtract());
         return byId;
     }

@@ -13,13 +13,13 @@ import java.util.List;
 
 /**
  * Java-side counterpart to the Scalafix {@code DuplicateMapKeyLiteralDetect}
- * rule (2026-09-29 coverage review, ported): {@code functions.map(k1, v1,
+ * rule, ported: {@code functions.map(k1, v1,
  * k2, v2, ...)} with two equal literal keys now throws a {@code
  * RuntimeException} in Spark 3.0 onward (governed by {@code
  * spark.sql.mapKeyDedupPolicy}), instead of silently keeping one arbitrary
  * value the way 2.4 did. The varargs {@code Column...} overload was
  * confirmed present via {@code javap} against the real {@code
- * spark-sql_2.11-2.4.8.jar} (2026-09-29).
+ * spark-sql_2.11-2.4.8.jar}.
  *
  * <p>Only flags a literal-vs-literal duplicate (two key arguments that are
  * both {@link J.Literal} with an equal value) -- a dynamic key expression

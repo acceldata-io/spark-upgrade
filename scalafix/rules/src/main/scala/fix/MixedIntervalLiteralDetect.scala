@@ -7,7 +7,7 @@ import scala.meta._
 import scala.util.matching.Regex
 
 /**
- * Tier 2 / Class A detector (design review Part 2 Family D / Part 4): since
+ * Tier 2 / Class A detector (Family D): since
  * Spark 3.2, a SQL `INTERVAL` literal can no longer mix year-month units
  * (YEAR/MONTH) with day-time units (DAY/HOUR/MINUTE/SECOND) in one literal
  * -- it must be split into two ANSI interval literals. This is a SQL-text

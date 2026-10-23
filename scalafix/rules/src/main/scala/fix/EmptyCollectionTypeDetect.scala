@@ -9,7 +9,7 @@ import scala.meta._
  * `array()`/`map()` called with no arguments infers `NullType` element(s) in
  * Spark 3.0 (`array<void>`), where 2.4 inferred `StringType`.
  *
- * Tier 1 since 2026-10-13, where the change is exact: the call becomes
+ * Tier 1, where the change is exact: the call becomes
  * `array().cast(ArrayType(StringType, false))` /
  * `map().cast(MapType(StringType, StringType, false))`. Probed on 2.4.8 and
  * 3.5.5: the full schema, nullability flags included, matches 2.4's for a

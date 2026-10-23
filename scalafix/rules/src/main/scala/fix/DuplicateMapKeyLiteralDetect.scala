@@ -6,11 +6,11 @@ import scalafix.v1._
 import scala.meta._
 
 /**
- * Tier 3 detector (design review Part 2 Family F): duplicate map keys throw
+ * Tier 3 detector (Family F): duplicate map keys throw
  * `RuntimeException` under Spark 3.0's default `spark.sql.mapKeyDedupPolicy`
  * (2.4 kept both entries: a lookup returned the first value, collect() the
  * last; probed on 2.4.8). That config is generally Class B
- * (data-dependent -- LegacyConfigRegistry's classB entry) because whether
+ * (data-dependent) because whether
  * duplicates occur normally depends on runtime data. But when both keys are
  * literal values written directly in a `map(...)`/`create_map(...)` call,
  * the duplication is certain at compile time, not data-dependent -- narrowed

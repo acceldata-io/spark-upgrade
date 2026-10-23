@@ -31,9 +31,9 @@ import scala.meta._
  * compile against the 2.4.8 jars that this produces a hard "reference to
  * ProcessingTime is ambiguous" error, since two wildcard imports providing
  * the same simple name is an ambiguity in Scala, not resolved by import
- * order. That's a real regression against PROJECT-GUIDE's "a Tier 1 rewrite
- * must compile under 2.4.8 too" rule -- it would have broken Phase A's own
- * sequential compilation the moment this rule ran on such a file. Fixed to
+ * order. That's a real regression against the rule that a Tier 1 rewrite
+ * must compile under 2.4.8 too -- it would have broken the sequential
+ * compilation between Tier 1 rules the moment this rule ran on such a file. Fixed to
  * replace the call site itself with the fully-qualified
  * `org.apache.spark.sql.streaming.Trigger.ProcessingTime`, which resolves
  * unambiguously regardless of what else is wildcard-imported (also verified
@@ -42,14 +42,14 @@ import scala.meta._
  * A third bug surfaced while fixing the second: the custom `matchOnTree`
  * walker's `case triggerMatcher(t) => ...` matched at whatever tree level it
  * was first encountered top-down -- since a `SymbolMatcher` also matches the
- * enclosing `Term.Apply` (the standard multi-match trap, PROJECT-GUIDE A.9
- * #2), it matched the WHOLE `ProcessingTime(1.second)` call, not just the
- * bare name, so `Patch.replaceTree` on it silently dropped the `(1.second)`
- * argument. Narrowed to `Term.Name` specifically (as `IsRunningLocallyWarn`/
+ * enclosing `Term.Apply` (the standard multi-match trap), it matched the
+ * WHOLE `ProcessingTime(1.second)` call, not just the bare name, so
+ * `Patch.replaceTree` on it silently dropped the `(1.second)` argument.
+ * Narrowed to `Term.Name` specifically (as `IsRunningLocallyWarn`/
  * `ShuffleWriteMetricsRenameDetect` already do) so only the identifier is
  * replaced and the call's own arguments survive untouched.
  *
- * A fourth, found in the 2026-10-16 user trial: the explicit
+ * A fourth, found on a real job: the explicit
  * `import org.apache.spark.sql.streaming.ProcessingTime` (or a renaming
  * import of it) was left behind, and it does not compile on 3.x, so the file
  * failed right after the rewrite. Every call site is now fully qualified, so

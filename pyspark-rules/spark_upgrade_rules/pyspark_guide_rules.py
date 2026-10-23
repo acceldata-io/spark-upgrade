@@ -1,7 +1,6 @@
-"""The PySpark upgrade guide's own 3.3 -> 3.4 core changes (spark-migrate-cli
-PYSPARK.md G14, SS10 R2 and R4) -- PySpark-only, so there is no Scala rule to
-port. Each claim was run against a real PySpark 3.5.5 session, with the
-legacy flag on to reproduce the pre-3.4 behaviour (PYSPARK.md SS8.13).
+"""The PySpark upgrade guide's own 3.3 -> 3.4 core changes -- PySpark-only, so
+there is no Scala rule to port. Each claim was run against a real PySpark 3.5.5
+session, with the legacy flag on to reproduce the pre-3.4 behaviour.
 """
 from __future__ import annotations
 
@@ -42,7 +41,7 @@ class ArrayTypeSchemaInference(Detector):
     flagged low -- one repo-wide decision, since one config settles them all.
 
     Rows that are a DataFrame's own (`df.rdd`, through row-preserving calls and
-    `map` lambdas that only pick the row's fields, the user trial's
+    `map` lambdas that only pick the row's fields, such as
     `df.rdd.map(lambda r: (r[0], r[2])).toDF([...])`) are not flagged: an array
     or map column has one element type, so its values infer the same under
     either rule."""
@@ -81,7 +80,7 @@ class ArrayTypeSchemaInference(Detector):
         if schema is not None and not self._names_only(schema):
             return
         # 3.5.5 ignores the legacy flag for an RDD's first row, so an RDD call
-        # site is not restored by the config the CLI injects (probed).
+        # site is not restored by injecting that config (probed).
         if self._dataframe_rows(_cst.receiver(node) if name == "toDF" else data):
             return
         rdd_id = f"{self.rule_id}.Rdd" if name == "toDF" or self._is_rdd(data) else None

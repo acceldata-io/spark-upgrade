@@ -16,17 +16,16 @@ import org.openrewrite.marker.SearchResult;
  * path argument to {@code DataFrameReader#load}/{@code DataFrameWriter#save}
  * -- purely syntactic, high confidence. Detect-only: the paired legacy config
  * ({@code spark.sql.legacy.pathOptionBehavior.enabled}) already exists in
- * {@code LegacyConfigRegistry} on the Scala side (config existence doesn't
- * depend on source language) -- Tier 2 as of 2026-09-25, this recipe's id
- * cross-linked into that same config's {@code detectionRuleIds} so Phase B
- * (spark-migrate-cli's {@code PhaseBRunner}) actually injects it.
+ * for the Scala rule (config existence doesn't depend on source language) --
+ * Tier 2, this recipe's id cross-linked to that same config
+ * so a caller can inject it.
  *
  * <p>Matches by {@link MethodMatcher} against the real {@code
  * DataFrameReader}/{@code DataFrameWriter} signatures (verified via {@code
- * javap} against the real 2.4.8 jar, 2026-09-24), not by method name alone --
+ * javap} against the real 2.4.8 jar), not by method name alone --
  * the original implementation fired on any method literally named {@code
  * load}/{@code save} with an argument, which is a false positive on any
- * unrelated builder of that shape (code review 2026-09-24 SS4.5). This is
+ * unrelated builder of that shape. This is
  * also what unblocks promoting this recipe off Tier 3 later: a name-only
  * match must never be promoted, a type-checked one safely can be once proven.
  *

@@ -6,7 +6,7 @@ import scalafix.v1._
 import scala.meta._
 
 /**
- * Design review Part 2 Family D: in 2.4, `add_months(d, n)` returned the last
+ * Family D: in 2.4, `add_months(d, n)` returned the last
  * day of the target month when `d` was the last day of its month
  * (2019-02-28 + 1 -> 2019-03-31); 3.x keeps the day (2019-03-28). No config
  * restores it, but this expression, using only functions 2.4 already has,

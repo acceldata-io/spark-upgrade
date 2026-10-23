@@ -6,7 +6,7 @@ import scalafix.v1._
 import scala.meta._
 
 /**
- * Design review Part 2 Family F: since Spark 3.4, `split(str, "")` (an
+ * Family F: since Spark 3.4, `split(str, "")` (an
  * empty-string regex) no longer ends the result with an empty string the way
  * 2.4 did ("abc" -> [a, b, c], where 2.4 gave [a, b, c, ""]). No config
  * restores it, but the regex "(?=)" -- a zero-width match at every position,

@@ -7,10 +7,10 @@ import scala.meta._
 import scala.util.Try
 
 /**
- * Plumbing for spark-migrate-cli, not a migration finding: reports the SQL text
- * of every `SparkSession.sql`/`SQLContext.sql` argument, so the CLI lints all of
- * a repo's SQL in one batched sqlfluff run with the linter the Java and PySpark
- * paths share (`SqlLiteralLinter`), and applies the audited SQL rewrites itself.
+ * Plumbing, not a migration finding: reports the SQL text of every
+ * `SparkSession.sql`/`SQLContext.sql` argument, so a caller can lint all of a
+ * repo's SQL in one batched sqlfluff run with the same linter it uses for Java
+ * and PySpark, and apply the audited SQL rewrites itself.
  * The counterpart of the Java recipe `SparkSqlLiteralExtract`.
  *
  * The finding's explanation is the kind, its change the SQL text:
@@ -47,7 +47,7 @@ class SparkSqlExtract extends SemanticRule("SparkSqlExtract") {
 
     // `sql` passed as a function over a collection: `ddl.foreach(spark.sql)`, `.map(spark.sql(_))`,
     // `.foreach(q => spark.sql(q))`. Each statement of a collection this file spells out is read where it is
-    // written (the 2026-10-19 user trial: a CHAR(2) column in a `Seq` of DDL strings was never linted).
+    // written (otherwise a CHAR(2) column in a `Seq` of DDL strings is never linted).
     def sqlFunction(fn: Term): Option[Tree] = fn match {
       case s @ Term.Select(_, Term.Name("sql")) if sqlMatcher.matches(s) => Some(s)
       case a @ Term.Apply(sqlMatcher(_), List(Term.Placeholder())) => Some(a)

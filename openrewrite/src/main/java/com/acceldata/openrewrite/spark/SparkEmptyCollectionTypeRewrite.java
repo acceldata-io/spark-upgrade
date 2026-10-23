@@ -23,7 +23,7 @@ import org.openrewrite.java.tree.J;
  * </pre>
  * On 3.5.5 that gives 2.4.8's full schema, nullability included, alone and
  * inside {@code coalesce}, {@code concat} and {@code when/otherwise}, and the
- * same Parquet schema (probed in Docker, 2026-10-13). {@code
+ * same Parquet schema (probed). {@code
  * .cast("array<string>")} would not: it gives {@code containsNull=true}.
  *
  * <p>Applied only where the generated column name is discarded ({@link

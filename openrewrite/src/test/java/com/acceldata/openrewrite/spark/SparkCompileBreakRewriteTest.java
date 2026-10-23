@@ -212,7 +212,7 @@ class SparkCompileBreakRewriteTest implements RewriteTest {
     @Test
     void base64OfAnExpressionGoesThroughOneHelper() {
         // The rewrite reads its argument three times: an expression is passed to a helper on the
-        // top-level class instead, evaluated once. The user trial's billing-java shape.
+        // top-level class instead, evaluated once.
         rewriteRun(spec -> spec.recipe(recipe("SunMiscBase64")),
                 java(
                         """

@@ -15,7 +15,7 @@ class AccumulatorUpgrade extends SemanticRule("AccumulatorUpgrade") {
 
     // Not rewritten: no typed accumulator preserves an Int (or a non-zero)
     // initial value, so a person picks the AccumulatorV2. The code is left as
-    // it is: it still compiles on 2.4, which the next Phase A rule needs, and
+    // it is: it still compiles on 2.4, which the next rule needs, and
     // the compile gate then names the line on 3.5. Its own id is Tier 3.
     val manualId = s"$ruleId.ManualMigration"
     def needsManualMigration(e: Tree): Patch =

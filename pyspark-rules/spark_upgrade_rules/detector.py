@@ -1,9 +1,9 @@
 """Detection-only rules: visitors that report findings and never edit the tree.
 
-Every port of a Scala detector (PYSPARK.md SS11.8) is one of these. They return
+Every port of a Scala detector is one of these. They return
 structured findings -- rule id, line, and a message written for that call site
 -- instead of writing a trailing `# <id>: ...` comment the way PySparkler's
-StatementLineCommentWriter does. The comment channel was the plan (SS11.3) and
+StatementLineCommentWriter does. That comment channel was tried first and
 was measured to lose exactly what a detector exists to say: the JVM side reads
 only *that a line changed*, so the per-site explanation ("pattern 'YYYY' uses
 the week-based year") collapses to the rule's generic description, and a match
@@ -17,8 +17,8 @@ tier where it cannot -- and return the rewritten node. Analysis runs it and
 keeps only the report (`run`); codegen keeps the tree (`apply`). One predicate
 decides both, so the report never promises a rewrite codegen does not make.
 
-A rule's id is its class attribute `rule_id`, a literal -- spark-migrate-cli's
-PyRuleRegistryDriftSpec reads it from this source.
+A rule's id is its class attribute `rule_id`, a literal, so a caller can read
+the ids from this source without importing it.
 """
 from __future__ import annotations
 

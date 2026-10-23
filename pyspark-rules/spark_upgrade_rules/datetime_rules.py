@@ -1,8 +1,8 @@
 """Family D: datetime patterns, add_months, time-zone ids.
 
 Ports of the Scala rules of the same ids. Each judgment reproduces what Spark
-3.5.5 itself does, and every claim was run against a real 3.5.5 session
-(PYSPARK.md SS8.12): the pattern checks are `DateTimeFormatterHelper.
+3.5.5 itself does, and every claim was run against a real 3.5.5 session:
+the pattern checks are `DateTimeFormatterHelper.
 convertIncompatiblePattern` plus the letter-count limits of the JDK's
 `DateTimeFormatter`, and the time-zone check is `ZoneId.of(id, SHORT_IDS)`
 after Spark's own `getZoneId` normalisation.

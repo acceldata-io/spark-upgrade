@@ -25,7 +25,7 @@ import scala.meta._
  * result is never named (nothing to detect there anyway, and the schema change
  * would surface in Data Validation) and it will not false-positive.
  *
- * One shape has an exact rewrite (Tier 1 since 2026-10-13, 3.x-only output, so
+ * One shape has an exact rewrite (Tier 1, 3.x-only output, so
  * `targetOnly`): the constructor. 3.0 added a `days` field and removed the
  * `(int months, long microseconds)` constructor, so `new CalendarInterval(m, us)`
  * becomes `new CalendarInterval(m, 0, us)`. Probed on 2.4.8 and 3.5.5: the same

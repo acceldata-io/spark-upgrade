@@ -13,7 +13,7 @@ import org.openrewrite.java.tree.J;
  * AnalysisException when the same reader or writer chain also sets {@code
  * .option("path", p)}. Spark 2.4 let the argument win: 2.4.8's {@code
  * load(String)} and {@code save(String)} overwrite the {@code path} option
- * with it (probed in Docker, 2026-10-13: {@code option("path", a).load(b)}
+ * with it (probed: {@code option("path", a).load(b)}
  * reads {@code b}; {@code option("path", c).save(d)} writes {@code d} only).
  * So dropping the {@code .option("path", p)} call gives 2.4.8's result.
  *

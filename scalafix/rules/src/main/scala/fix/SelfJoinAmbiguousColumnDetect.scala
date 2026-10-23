@@ -6,14 +6,14 @@ import scalafix.v1._
 import scala.meta._
 
 /**
- * Tier 2 / Class A detector (design review Part 2 Family G / Part 4):
+ * Tier 2 / Class A detector (Family G):
  * since Spark 3.0, `spark.sql.analyzer.failAmbiguousSelfJoin` fails an
  * ambiguous self-join at analysis time instead of silently resolving column
  * references (sometimes to the wrong side). Narrowed to `df.join(df, ...)`
  * where the join receiver and the first argument (the other side of every
  * `Dataset.join` overload) resolve to the exact same symbol.
  *
- * Narrowed further (2026-10-15) by a probe on 2.4.8 and 3.5.5 with default
+ * Narrowed further by a probe on 2.4.8 and 3.5.5 with default
  * configs: what fails on 3.5.5 is a column referenced through the frame --
  * `df("n") > df("n")` in the condition, `.select(df("v"))` or
  * `.filter(df("n") > 15)` after the join -- where 2.4 silently resolved it to
@@ -35,7 +35,7 @@ class SelfJoinAmbiguousColumnDetect extends SemanticRule("SelfJoinAmbiguousColum
   private val joinMatcher = SymbolMatcher.normalized("org.apache.spark.sql.Dataset.join")
 
   /** Both sides name the same frame. Only a plain name counts: two calls (`conv.as("v")`,
-   *  `eligible.as("t")`) share the method's symbol, not a frame (the 2026-10-19 user trial), and
+   *  `eligible.as("t")`) share the method's symbol, not a frame, and
    *  an aliased side is the fix itself. */
   private def sameReference(a: Tree, b: Tree)(implicit doc: SemanticDocument): Boolean = (a, b) match {
     case (x: Term.Name, y: Term.Name) =>

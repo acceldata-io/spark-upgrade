@@ -15,7 +15,7 @@ class SparkAccumulatorV1RewriteTest implements RewriteTest {
 
     @Test
     void integerCounterBecomesALongAccumulator() {
-        // The user trial's billing-java shape: a local Integer counter used in a lambda and read once.
+        // A common shape: a local Integer counter used in a lambda and read once.
         rewriteRun(
                 java(
                         """

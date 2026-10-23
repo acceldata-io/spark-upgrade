@@ -5,8 +5,7 @@ package fix.support
  * SimpleDateFormat, 3.x DateTimeFormatter through
  * DateTimeFormatterHelper.convertIncompatiblePattern. A port of pyspark-rules'
  * `datetime_rules.check_pattern`, whose every claim was run on 3.5.5
- * (spark-migrate-cli PYSPARK.md SS8.12: 36 patterns through to_timestamp and
- * date_format), so the Scala and Java rules judge a pattern as PySpark does.
+ * (36 patterns through to_timestamp and date_format), so the Scala and Java rules judge a pattern as PySpark does.
  */
 object DateTimePatterns {
 

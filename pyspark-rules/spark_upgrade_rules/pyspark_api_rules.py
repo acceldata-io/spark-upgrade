@@ -3,11 +3,10 @@ the three with an exact rewrite.
 
 The list of removals is not transcribed from a guide: it is every public name
 2.4.8's `python/pyspark` defines that a live 3.5.5 import no longer has,
-diffed module by module and member by member (spark-migrate-cli PYSPARK.md
-SS2.7), then the class attributes and parameter lists that diff skipped
-(spark-migrate-cli docs/triage-2026-10-13/api-pyspark.md). Three are covered
-elsewhere: `pyspark.streaming.kafka` and `pyspark.streaming.flume` are hard
-blockers on the JVM side, and the `Has*` mixins' setters are
+diffed module by module and member by member, then the class attributes and
+parameter lists that diff skipped. Three are covered elsewhere:
+`pyspark.streaming.kafka` and `pyspark.streaming.flume` are dependency blockers
+(their connectors are gone in 3.x), and the `Has*` mixins' setters are
 `MlSharedParamSetters` below. Not covered, so the list is not complete: a name
 imported through a module that re-exported it in 2.4 and no longer does, a
 name dropped only from `__all__` (a star import misses it), and the setters
@@ -278,7 +277,7 @@ _GONE = {
        for key, private in _PRIVATE_ML.items()},
 }
 # Modules 3.5.5 no longer has, for `import <module>` (the `from` forms are in the tables above).
-# pyspark.streaming.kafka and .flume are spark-migrate-cli's DepUpgrade.EcosystemHardBlocker.
+# pyspark.streaming.kafka and .flume are left out: their connectors are a dependency blocker.
 _GONE_MODULES = {"pyspark.heapq3": "removed in 3.x -- use Python's own heapq (import heapq)"}
 
 # StorageLevel's serialized aliases: in 2.4 each was the same object as the

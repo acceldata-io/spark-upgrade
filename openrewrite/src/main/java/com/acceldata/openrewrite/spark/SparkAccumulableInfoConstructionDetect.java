@@ -9,22 +9,22 @@ import org.openrewrite.java.tree.J;
 import org.openrewrite.marker.SearchResult;
 
 /**
- * Java-side rule closing a 2026-09-29 coverage-review gap against the
+ * Java-side rule closing a coverage gap against the
  * Spark core migration guide: {@code AccumulableInfo.apply(...)} is removed
  * in Spark 3.0 (it "is not supposed to be called by end users"), and direct
  * construction goes with it. Both the companion object's {@code apply}
  * overloads (3/4/5/7-arg Java-friendly convenience factories) and the raw
  * 7-arg constructor were confirmed present and callable from Java via
  * {@code javap} against the real {@code spark-core_2.11-2.4.8.jar}
- * (2026-09-29) -- {@code org.apache.spark.scheduler.AccumulableInfo} is an
+ * -- {@code org.apache.spark.scheduler.AccumulableInfo} is an
  * ordinary Scala case class, so its generated {@code <init>} and companion
  * {@code apply} are both plain {@code public static}/{@code public}
  * members, not Scala-only.
  *
- * <p>Detect-only (Tier 3, per this session's policy for every new rule):
+ * <p>Detect-only (Tier 3, as every new rule starts):
  * there is no single safe replacement expression -- {@code AccumulableInfo}
  * itself is only ever constructed internally by Spark's own accumulator
- * plumbing, so a customer's own call to it needs individual review of why
+ * plumbing, so a user's own call to it needs individual review of why
  * it's there at all, not a mechanical rewrite.
  */
 public class SparkAccumulableInfoConstructionDetect extends Recipe {

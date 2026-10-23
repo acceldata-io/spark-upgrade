@@ -10,9 +10,9 @@ import scala.util.matching.Regex
  * Family K (SQL migration guide, 2.4 -> 3.0): a bare `FROM <table>` was
  * accepted by accident in 2.4 and below and is rejected outright in 3.0. Hive's
  * FROM-first forms, `FROM t SELECT c` and `FROM t INSERT ...`, still parse and
- * run on 3.5.5 (probed 2026-10-13: `FROM t SELECT id` returns 1), so only a
- * leading `FROM` with no SELECT after it is flagged -- the same test the CLI's
- * SqlLiteralLinter applies for Java and PySpark.
+ * run on 3.5.5 (probed: `FROM t SELECT id` returns 1), so only a
+ * leading `FROM` with no SELECT after it is flagged -- the same test to apply to
+ * embedded SQL for Java and PySpark.
  *
  * Implemented Scala-side rather than as a sqlfluff plugin rule -- which is the
  * opposite of the "consolidate Family K into the plugin" direction, and needs
@@ -24,7 +24,7 @@ import scala.util.matching.Regex
  * `unparsable` segment type would fire on any construct the dialect doesn't
  * cover, not just this one.
  *
- * Tier 1 since 2026-10-13: the statement becomes `SELECT * FROM ...`. Probed on
+ * Tier 1: the statement becomes `SELECT * FROM ...`. Probed on
  * 2.4.8 and 3.5.5, the columns and rows match for `FROM t`, with WHERE,
  * ORDER BY/LIMIT, DISTRIBUTE BY, a JOIN, LATERAL VIEW, a table alias and a
  * subquery. Not for GROUP BY (2.4 returned zero columns there; `SELECT *` fails

@@ -10,7 +10,7 @@ import scala.meta._
  * removed along with local execution. Verified present in the real
  * `spark-core_2.11-2.4.8.jar`, so a 2.4.8 codebase can genuinely be calling it.
  *
- * Tier 1 since 2026-10-13: 2.4.8's body is `return false` (javap:
+ * Tier 1: 2.4.8's body is `return false` (javap:
  * `iconst_0; ireturn`), so the call is replaced with `false`, which is 2.4's
  * result on every version (probed on 2.4.8 inside tasks). Only when dropping
  * the receiver cannot drop a side effect: `TaskContext.get()` /

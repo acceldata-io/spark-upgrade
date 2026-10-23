@@ -9,7 +9,7 @@ import org.openrewrite.java.tree.TypeUtils;
 import org.openrewrite.marker.SearchResult;
 
 /**
- * Java-side rule closing a 2026-09-29 coverage-review gap against the MLlib
+ * Java-side rule closing a coverage gap against the MLlib
  * migration guide: the old {@code
  * org.apache.spark.ml.feature.OneHotEncoder} is removed in Spark 3.0, and
  * {@code OneHotEncoderEstimator} (the multi-column-capable replacement

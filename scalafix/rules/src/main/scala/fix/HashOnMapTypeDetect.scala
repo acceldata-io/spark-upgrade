@@ -6,7 +6,7 @@ import scalafix.v1._
 import scala.meta._
 
 /**
- * Tier 2 / Class A detector (design review Part 2 Family F / Part 4):
+ * Tier 2 / Class A detector (Family F):
  * `hash()`/`xxhash64()` on a MapType column throws in Spark 3.0 (was
  * silently permissive before). Reliably resolving an arbitrary argument's
  * type back to MapType isn't always possible from the call site alone, so

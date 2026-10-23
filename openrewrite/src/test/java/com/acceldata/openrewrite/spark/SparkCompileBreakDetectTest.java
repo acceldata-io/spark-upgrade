@@ -138,7 +138,7 @@ class SparkCompileBreakDetectTest implements RewriteTest {
 
     @Test
     void removedTypesByName() {
-        // sun.misc does not exist on this JDK 17 test classpath, as on the CLI's.
+        // sun.misc does not exist on this JDK 17 test classpath, as on a migrated job's.
         // The encoder is kept in a field and InterfaceStability is used
         // outside an annotation, so their imports stay and are reported.
         rewriteRun(spec -> spec.recipes(recipe("SunMiscBase64"), recipe("InterfaceStability"), recipe("AccumulableApi"))

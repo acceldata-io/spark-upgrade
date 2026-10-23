@@ -19,7 +19,7 @@ import org.openrewrite.marker.SearchResult;
  * {@code saveAsTable} in append mode -- {@code SaveMode.Append}, the string
  * {@code "append"}, or a mode it cannot read. Any other mode takes the table's
  * schema from the DataFrame and never fails. Embedded SQL {@code INSERT}s are
- * the shared SQL linter's, in spark-migrate-cli.
+ * left to the embedded-SQL linter.
  *
  * <p>Feeds {@code spark.sql.storeAssignmentPolicy} (Tier 2).
  */

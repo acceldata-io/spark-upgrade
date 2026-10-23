@@ -13,7 +13,7 @@ import scala.meta._
  * import rewrites below are exact and semantics-preserving (Spark only
  * allows one active `SparkContext` per JVM, so `getOrCreate()` reuses the
  * exact `sc` that was just constructed rather than creating a new one) --
- * promoted from Tier 3 to Tier 1 for the 2026-08-25 tier audit; there was no
+ * promoted from Tier 3 to Tier 1 in a tier audit; there was no
  * documented reason it was Tier 3, just under-classification.
  *
  * The bare TYPE REFERENCE case (a `HiveContext`-typed val/param rewritten to
@@ -22,18 +22,17 @@ import scala.meta._
  * break compilation elsewhere in the same file if a Hive-specific method
  * (e.g. `refreshTable`) is later called on that now-`SQLContext`-typed
  * reference. That split turned out to be cosmetic and actively misleading:
- * `PhaseARunner` decides whether to run a rule at the TOP-LEVEL rule-id
- * granularity only (`RuleRegistry.all.collect { tier == 1 && !id.contains('.') }`,
- * then one `scalafixAll <ruleId>` per Tier 1 id) and explicitly excludes
- * dotted sub-ids from ever being independently invoked -- so once
- * `MigrateHiveContext` itself is Tier 1, Phase A runs this rule's `fix()` in
- * full, which emits (and Phase A applies) the type-reference patches too,
+ * Tier 1 rules are run at the TOP-LEVEL rule-id granularity only (one
+ * `scalafixAll <ruleId>` per Tier 1 id in `RuleRegistry`), and dotted sub-ids
+ * are never invoked on their own -- so once `MigrateHiveContext` itself is
+ * Tier 1, running it runs this rule's `fix()` in full, which emits (and
+ * applies) the type-reference patches too,
  * regardless of what sub-id string they're reported under. A separate,
  * lower tier for that sub-id wouldn't have stopped it from being
- * auto-applied -- it would only have made findings.json falsely claim it
+ * auto-applied -- it would only have made the findings falsely claim it
  * still needed manual review. Merged back under the parent rule id instead;
  * the residual risk is real but narrow (this specific shape is caught by
- * the `compile` gate before ever reaching a customer, the same backstop
+ * a compile of the migrated code before it ever ships, the same backstop
  * every other Tier 1 rewrite in this codebase relies on) and only a genuine
  * rule SPLIT (a distinct `SemanticRule` class with its own SPI entry) could
  * actually gate it independently -- not worth the complexity for how rare
@@ -45,7 +44,7 @@ import scala.meta._
  * `HiveContext` has no companion object at all in 2.4.8 (no `HiveContext$.class`),
  * unlike `SQLContext`, which does carry a real `getOrCreate(SparkContext)`.
  * That branch was dead code, the same class of bug as `OnFailureFix`'s
- * dead matcher from the 2026-08-25 precision audit.
+ * dead matcher.
  */
 class MigrateHiveContext extends SemanticRule("MigrateHiveContext") {
 

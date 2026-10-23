@@ -12,9 +12,8 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * End-to-end pin for {@code --mode fix} (added 2026-09-24 to wire codegen's
- * fix mode for the two Tier 1 Java recipes -- {@code SparkUnionAllRename}/
- * {@code SparkShuffleWriteMetricsRename}). Runs the real {@code Runner.main}
+ * End-to-end pin for {@code --mode fix}, with the Tier 1 Java recipes
+ * {@code SparkUnionAllRename} and {@code SparkShuffleWriteMetricsRename}. Runs the real {@code Runner.main}
  * entry point, the same one {@code cs launch} invokes in production, against
  * a real temp file and the real test classpath -- not a unit test of
  * {@code RecipeCatalog} alone, because the bug class this guards against

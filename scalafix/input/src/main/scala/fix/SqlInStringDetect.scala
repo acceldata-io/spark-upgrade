@@ -14,7 +14,7 @@ object SqlInStringDetectExample {
     // `// assert: SqlInStringDetect`, left behind when the rule was narrowed;
     // it made the testkit permanently red and the failure was on record as a
     // version-coupled sqlfluff flake rather than what it is -- a stale
-    // assertion. Removed 2026-09-24.
+    // assertion. Removed.
     spark.sql("SELECT * FROM people")
     spark.sql(s"SELECT * FROM $table") // assert: SqlInStringDetect
     spark.sql(buildQuery()) // assert: SqlInStringDetect

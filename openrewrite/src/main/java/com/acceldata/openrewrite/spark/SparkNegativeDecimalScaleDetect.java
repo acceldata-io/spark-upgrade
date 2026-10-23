@@ -15,11 +15,10 @@ import org.openrewrite.marker.SearchResult;
  * Narrowed to a literal negative {@code int} scale argument, same as the
  * Scala rule -- the only shape that's statically certain without evaluating
  * an arbitrary expression. Feeds {@code spark.sql.legacy.allowNegativeScaleOfDecimal}
- * -- Tier 2 as of 2026-09-25, cross-linked into the existing {@code
- * LegacyConfigRegistry} entry's {@code detectionRuleIds} so Phase B
- * (spark-migrate-cli's {@code PhaseBRunner}) actually injects it. Constructor
+ * -- Tier 2, cross-linked to that config so a caller can
+ * inject it. Constructor
  * verified present in the real {@code spark-catalyst_2.11-2.4.8.jar} via
- * {@code javap} (2026-09-24). Like
+ * {@code javap}. Like
  * scalameta, javac's grammar (and OpenRewrite's parser, which mirrors it)
  * parses {@code -2} as unary negation of the literal {@code 2}
  * ({@code J.Unary(Negative, J.Literal(2))}), not as a single negative

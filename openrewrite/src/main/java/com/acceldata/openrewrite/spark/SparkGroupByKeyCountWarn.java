@@ -16,7 +16,7 @@ import org.openrewrite.marker.SearchResult;
  * KeyValueGroupedDataset.aggUntyped}, which names the column ({@code
  * reduceGroups} is an {@code agg} of a {@code ReduceAggregator}). {@code
  * mapGroups}/{@code flatMapGroups}/{@code keys} are unaffected and not
- * matched. Probed on 2.4.8 and 3.5.5 in Docker (2026-10-13), and the config
+ * matched. Probed on 2.4.8 and 3.5.5, and the config
  * below restores {@code "value"} for all three.
  *
  * <p>Tier 2: {@code spark.sql.legacy.dataset.nameNonStructGroupingKeyAsValue=true}

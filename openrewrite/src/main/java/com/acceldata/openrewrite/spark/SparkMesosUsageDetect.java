@@ -8,7 +8,7 @@ import org.openrewrite.java.tree.J;
 import org.openrewrite.marker.SearchResult;
 
 /**
- * Java-side rule closing a 2026-09-29 coverage-review gap against the core
+ * Java-side rule closing a coverage gap against the core
  * migration guide (ported from the Scalafix {@code MesosRemovedWarn}
  * rule's intent): Mesos as a resource manager is deprecated in Spark 3.2
  * and removed in Spark 4.0. Any code referencing the {@code

@@ -24,7 +24,7 @@ import java.util.List;
  * The rewrite inserts {@code 0} days: {@code new CalendarInterval(m, 0, us)}
  * holds the same value. Added to a timestamp it gives 2.4.8's instants on
  * 3.5.5, also across a DST change, where splitting whole days out of {@code
- * us} would not (Docker probe, 2026-10-13, America/Los_Angeles). The output
+ * us} would not (probed, America/Los_Angeles). The output
  * needs 3.x.
  *
  * <p>Spark names an unaliased {@code lit(interval)} column after the value, and

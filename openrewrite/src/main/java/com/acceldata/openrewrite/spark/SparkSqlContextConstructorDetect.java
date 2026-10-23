@@ -12,9 +12,9 @@ import org.openrewrite.marker.SearchResult;
  * Java-side counterpart to the Scalafix {@code MigrateToSparkSessionBuilder}
  * rule: direct {@code SQLContext} construction is deprecated in favor of
  * {@code SparkSession.builder()...getOrCreate()}. The constructors still
- * exist in 3.5.5 ({@code javap} 2026-10-13), so this is not a compile break. All three constructors
+ * exist in 3.5.5 ({@code javap}), so this is not a compile break. All three constructors
  * verified present in the real {@code spark-sql_2.11-2.4.8.jar} via
- * {@code javap} (2026-09-24).
+ * {@code javap}.
  *
  * <p>Detect-only, unlike the Scala rule's Tier 1 rewrite: the Scala rule
  * rewrites a construction expression in place because Scala's `new
@@ -22,7 +22,7 @@ import org.openrewrite.marker.SearchResult;
  * single expressions substitutable at the same call site. The equivalent
  * Java rewrite needs a {@code JavaTemplate} to restructure the call shape
  * (`new SQLContext(sc)` &#8594; a builder chain), which needs its own
- * classpath-resolution setup this pass doesn't have -- flagged for manual
+ * classpath-resolution setup this recipe set doesn't have -- flagged for manual
  * migration instead of risking a wrong auto-rewrite.
  */
 public class SparkSqlContextConstructorDetect extends Recipe {

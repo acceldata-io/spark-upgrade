@@ -13,8 +13,8 @@ import java.util.regex.Pattern;
  * What Spark 3.5.5 does differently from 2.4 with a datetime pattern (2.4:
  * SimpleDateFormat; 3.x: DateTimeFormatter). A port of pyspark-rules'
  * {@code datetime_rules.check_pattern} and the Scalafix rules'
- * {@code fix.support.DateTimePatterns}, whose claims were run on 3.5.5
- * (spark-migrate-cli PYSPARK.md SS8.12), so the three paths judge a pattern
+ * {@code fix.support.DateTimePatterns}, whose claims were run on 3.5.5, so
+ * the three paths judge a pattern
  * alike.
  */
 final class DateTimePatterns {

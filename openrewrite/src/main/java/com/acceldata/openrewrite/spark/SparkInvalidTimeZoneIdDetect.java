@@ -27,7 +27,7 @@ import java.time.ZoneId;
  *
  * <p>{@code from_utc_timestamp}/{@code to_utc_timestamp}'s {@code
  * (Column, String)} overloads verified present in the real {@code
- * spark-sql_2.11-2.4.8.jar} via {@code javap} (2026-09-24).
+ * spark-sql_2.11-2.4.8.jar} via {@code javap}.
  */
 public class SparkInvalidTimeZoneIdDetect extends Recipe {
 

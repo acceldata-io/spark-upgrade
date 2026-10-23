@@ -1,8 +1,8 @@
 """Every detector: a landmine that must fire and a contrast that must not.
 
 The contrasts are the point. Each one is a shape a looser matcher would flag
-and Spark 3.5.5 runs fine -- probed against a real 3.5.5 session (spark-migrate-cli
-PYSPARK.md SS8.12) -- or a pandas call with the same method name.
+and Spark 3.5.5 runs fine -- probed against a real 3.5.5 session -- or a pandas
+call with the same method name.
 """
 import textwrap
 import unittest
@@ -246,8 +246,7 @@ class DataFrameRulesTest(unittest.TestCase):
         self.assertEqual(run(code, self.rule), [], "ok7: df2 is rebound, so its lineage is not followed")
 
     def test_a_join_in_a_loop_over_frames_the_loop_relinks(self):
-        # The 2026-10-19 user trial's customer-360 identity loop. Probed
-        # 2026-10-22: from the second pass 3.5.5 fails it with MISSING_ATTRIBUTES
+        # An iterative identity-resolution loop. Probed: from the second pass 3.5.5 fails it with MISSING_ATTRIBUTES
         # even with failAmbiguousSelfJoin=false, with or without the checkpoint;
         # 2.4.8 runs it.
         code = """
@@ -390,7 +389,7 @@ class DataSourceRulesTest(unittest.TestCase):
 
 
 class PySparkGuide34Test(unittest.TestCase):
-    """The PySpark guide's 3.3 -> 3.4 hop (PYSPARK.md G14)."""
+    """The PySpark guide's 3.3 -> 3.4 hop."""
 
     def test_array_inference_decidable_from_literal_rows(self):
         code = """
@@ -442,7 +441,7 @@ class PySparkGuide34Test(unittest.TestCase):
 
     def test_array_inference_skips_a_dataframes_own_rows(self):
         # A typed column holds one element type, so its values infer the same under either
-        # rule (the 2026-10-16 user trial's must-fix noise on marketing-pyspark).
+        # rule, so flagging them is noise.
         code = """
             a = df.rdd.map(lambda r: (r[0], r[2])).toDF(["campaign", "opens"])
             b = spark.createDataFrame(df.rdd)

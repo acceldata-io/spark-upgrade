@@ -13,13 +13,13 @@ import java.util.List;
 
 /**
  * Java-side counterpart to the Scalafix {@code MapTypeKeyInCreateMapDetect}
- * rule (2026-09-29 coverage review, ported): a {@code MapType}-typed key
+ * rule, ported: a {@code MapType}-typed key
  * inside {@code functions.map(...)} -- i.e. one key argument is itself
  * another {@code map(...)} call -- is disallowed by Spark 3.0's analyzer
  * ({@code AnalysisException}, since map keys must support equality/hashing
  * and {@code MapType} doesn't), whereas 2.4 let it through. The varargs
  * {@code Column...} overload was confirmed present via {@code javap}
- * against the real {@code spark-sql_2.11-2.4.8.jar} (2026-09-29).
+ * against the real {@code spark-sql_2.11-2.4.8.jar}.
  *
  * <p>Only matches a key argument that is itself a direct {@code
  * functions.map(...)} call -- a variable holding a {@code MapType} column

@@ -19,10 +19,9 @@ import java.util.List;
  * with {@code java.time.format.DateTimeFormatter} instead of {@code
  * java.text.SimpleDateFormat}. All five {@code (Column, String)} overloads
  * were confirmed present via {@code javap} against the real
- * {@code spark-sql_2.11-2.4.8.jar} (2026-09-29).
+ * {@code spark-sql_2.11-2.4.8.jar}.
  *
- * <p>Until 2026-10-15 this flagged every literal pattern; it now flags only a
- * pattern {@link DateTimePatterns#check} finds 3.5.5 rejects or reads
+ * <p>It flags only a pattern {@link DateTimePatterns#check} finds 3.5.5 rejects or reads
  * differently -- the probed table the Scala and PySpark rules share. Feeds
  * {@code spark.sql.legacy.timeParserPolicy}.
  */
