@@ -338,7 +338,11 @@ class CompileBreakDetect extends SemanticRule("CompileBreakDetect") {
     }
   }
 
-  private val breaks: Seq[Break] = Seq(
+  // A removal the target line does not have yet is left alone: RowEncoder(schema)
+  // still compiles on 3.3, where ExpressionEncoder(StructType) does not exist.
+  private def breaks: Seq[Break] = allBreaks.filterNot(b => b.sub == "RowEncoderApply" && !_root_.fix.support.TargetSpark.atLeast(3, 5))
+
+  private val allBreaks: Seq[Break] = Seq(
     Break("ForeachPartitionLambda", Seq("org.apache.spark.sql.Dataset.foreachPartition"),
       "Scala 2.12 resolves an untyped lambda passed to Dataset.foreachPartition to the Java ForeachPartitionFunction " +
         "overload, so its parameter is a java.util.Iterator and the call fails to compile (\"value size is not a " +

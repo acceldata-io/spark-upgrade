@@ -908,6 +908,26 @@ class PythonStdlibCallsTest(unittest.TestCase):
         self.assertEqual([(f["line"], f.get("tier"), f["confidence"]) for f in found], [(3, None, "medium")])
 
 
+    def test_element_tree_getchildren_is_reported_where_the_file_imports_xml_etree(self):
+        # The 2026-11-14 user trial: root.getchildren() on Python 3.10 (AttributeError).
+        out, found = PythonStdlibRemovedTest.run_fix("""
+            import xml.etree.ElementTree as ET
+            root = ET.parse(path).getroot()
+            for p in root.getchildren():
+                tags = [e.tag for e in p.getiterator("x")]
+        """)
+        self.assertIn("root.getchildren()", out)
+        self.assertEqual([(f["line"], f.get("tier"), f["confidence"]) for f in found], [(4, None, "medium"), (5, None, "medium")])
+        self.assertIn("list(elem)", found[0]["message"])
+
+    def test_lxml_elements_keep_getchildren(self):
+        _, found = PythonStdlibRemovedTest.run_fix("""
+            import xml.etree.ElementTree as ET
+            from lxml import etree
+            kids = node.getchildren()
+        """)
+        self.assertEqual(found, [])
+
 class PythonLibraryRemovedTest(unittest.TestCase):
     """numpy 1.24, pandas 2.0 and PyYAML 6 removals (np.float, Series.iteritems,
     DataFrame.append and yaml.load fail once pip installs current releases on

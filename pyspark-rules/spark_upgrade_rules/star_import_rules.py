@@ -1,8 +1,9 @@
-"""`from pyspark.sql.functions import *` binds more names on 3.5.5 than on 2.4.8.
+"""`from pyspark.sql.functions import *` binds more names on Spark 3 than on 2.4.8.
 
-2.4.8's `pyspark.sql.functions` had an `__all__`; 3.5.5's has none, so its
-star import binds every public module global: 255 names 2.4.8's did not
-(listed below, from a live import of each). Three kinds of 2.4 code change meaning:
+2.4.8's `pyspark.sql.functions` had an `__all__`; 3.x's has none, so its
+star import binds every public module global: 255 names 2.4.8's did not on
+3.5.5, 73 on 3.3.3 (listed below, from a live import of each; the target line
+is `target.LINE`). Three kinds of 2.4 code change meaning:
 
   - A Python builtin the star import now shadows: only `filter`. The other
     builtins it binds (`abs`, `max`, `min`, `round`, `sum`, ...) 2.4.8 already
@@ -27,12 +28,12 @@ import libcst as cst
 from libcst.helpers import get_full_name_for_node
 from libcst.metadata import BuiltinAssignment, ImportAssignment, PositionProvider, QualifiedNameProvider, ScopeProvider
 
-from spark_upgrade_rules import _cst
+from spark_upgrade_rules import _cst, target
 from spark_upgrade_rules.detector import Fixer
 
 # `from pyspark.sql.functions import *` on 3.5.5 minus the same on 2.4.8, each
 # run on that version. (2.4.8's `basestring` is the one name it lost.)
-NEW_STAR_NAMES = frozenset("""
+_NEW_ON_355 = frozenset("""
 Any ArrayType Callable Column DataFrame DataType Dict Iterable JVMView List Optional PySparkTypeError PySparkValueError
 SparkContext StringType StructType TYPE_CHECKING Tuple Type Union UserDefinedFunction UserDefinedTableFunction ValuesView
 acosh aes_decrypt aes_encrypt aggregate any_value approx_percentile array_agg array_append array_compact array_insert
@@ -59,6 +60,21 @@ version warnings weekday width_bucket window_time xpath xpath_boolean xpath_doub
 xpath_number xpath_short xpath_string xxhash64 years zip_with
 """.split())
 
+# The same on 3.3.3 (a live import of v3.3.3's python/, 2026-11-14): 71 of the
+# names above, plus `since` and `PythonEvalType`, which 3.3.3 binds and 3.5.5
+# does not (2.4.8's `__all__` left both out).
+_NEW_ON_333 = frozenset("""
+Any ArrayType Callable Column DataFrame DataType Dict Iterable List Optional PythonEvalType SparkContext StringType
+StructType TYPE_CHECKING Tuple Union UserDefinedFunction ValuesView acosh aggregate asinh assert_true atanh bit_length
+bitwise_not bucket cast cot count_distinct csc days exists filter forall from_csv functools hours inspect make_date
+map_entries map_filter map_zip_with max_by min_by months nth_value octet_length overlay overload percentile_approx
+product raise_error schema_of_csv sec sentences session_window shiftleft shiftright shiftrightunsigned since
+sum_distinct sys timestamp_seconds to_csv to_str transform transform_keys transform_values warnings xxhash64 years
+zip_with
+""".split())
+
+NEW_STAR_NAMES = _NEW_ON_333 if target.LINE == "3.3" else _NEW_ON_355
+
 # The new names 3.5.5's functions module imports rather than defines, and from
 # where: a module that imported the same thing gets the same object back.
 _REEXPORTED = {
@@ -66,6 +82,8 @@ _REEXPORTED = {
     **{n: f"typing.{n}" for n in ("Any", "Callable", "Dict", "Iterable", "List", "Optional", "TYPE_CHECKING", "Tuple",
                                   "Type", "Union", "ValuesView", "cast", "overload")},
     "JVMView": "py4j.java_gateway.JVMView",
+    "since": "pyspark.since",
+    "PythonEvalType": "pyspark.rdd.PythonEvalType",
     **{n: "pyspark." + n for n in ("ArrayType", "Column", "DataFrame", "DataType", "PySparkTypeError", "PySparkValueError",
                                    "SparkContext", "StringType", "StructType", "UserDefinedFunction",
                                    "UserDefinedTableFunction", "get_active_spark_context", "has_numpy", "to_str",
@@ -97,7 +115,7 @@ def _bound(alias: cst.ImportAlias) -> str:
 
 class StarImportShadowsFilter(Fixer):
     """`from pyspark.sql.functions import *`: on 3.5.5 it also binds `filter`
-    and 254 other names 2.4.8's did not export. See the module docstring."""
+    and the other names 2.4.8's did not export. See the module docstring."""
 
     rule_id = "StarImportShadowsFilter"
     METADATA_DEPENDENCIES = (PositionProvider, QualifiedNameProvider, ScopeProvider)
@@ -149,7 +167,7 @@ class StarImportShadowsFilter(Fixer):
     @staticmethod
     def _builtin_message(name: str) -> str:
         return (f"`{name}` here is Python's builtin under `from pyspark.sql.functions import *`. 2.4.8's star import did "
-                f"not export {name}; 3.5.5's does (pyspark.sql.functions.{name}), so this would call Spark's function -- "
+                f"not export {name}; {target.RELEASE}'s does (pyspark.sql.functions.{name}), so this would call Spark's function -- "
                 "a type error or a Column, not an iterator.")
 
     def _rebound_before_star(self, module: cst.Module, name: str, assignments, star_line: int) -> None:
@@ -170,14 +188,14 @@ class StarImportShadowsFilter(Fixer):
             again = cst.SimpleStatementLine(body=[imp.with_changes(names=[alias], **(
                 {"lpar": None, "rpar": None} if isinstance(imp, cst.ImportFrom) else {}))])
             self.reimports.append((line(last), again))
-            self.report(star, f"`{name}`, imported on line {line(last)}, is replaced by this star import on 3.5.5, which "
+            self.report(star, f"`{name}`, imported on line {line(last)}, is replaced by this star import on {target.RELEASE}, which "
                               f"exports pyspark.sql.functions.{name}; 2.4.8's did not. The import is repeated after the "
                               f"star import, so `{name}` is what it was on 2.4.", "high", tier=1,
                         fix=f"{self.code(star)} -> {self.code(star)}; {self.code(again)}")
         else:
             self.report(last.node if isinstance(last.node, cst.CSTNode) else star,
                         f"`{name}`, defined on line {line(last)}, is replaced by the star import on line {star_line} on "
-                        f"3.5.5, which exports pyspark.sql.functions.{name}; 2.4.8's did not. Move the definition below "
+                        f"{target.RELEASE}, which exports pyspark.sql.functions.{name}; 2.4.8's did not. Move the definition below "
                         "the star import, or import the Spark functions by name.", "high", tier=3)
 
     @staticmethod

@@ -5,9 +5,9 @@ Spark 3.0 made RuntimeConfig reject a core (SparkConf) key: both `SET k=v` and
 `spark.conf.set(k, v)` go through `RuntimeConfig.requireNonStaticConf`, which
 throws CANNOT_MODIFY_CONFIG when `ConfigEntry.findEntry(k) != null` and `k` is
 not a SQL config. In 2.4 the call was accepted and did nothing. The keys are
-Spark 3.5.5's own (data/spark_core_config_keys_3_5_5.txt), so a Hive key
-(`hive.exec.dynamic.partition.mode`), an app key (`spark.myapp.x`) or a
-`spark.hadoop.*` key -- all of which 3.5.5 accepts -- never fire.
+the target release's own (data/spark_core_config_keys_<release>.txt, `target`),
+so a Hive key (`hive.exec.dynamic.partition.mode`), an app key (`spark.myapp.x`)
+or a `spark.hadoop.*` key -- all of which Spark 3 accepts -- never fire.
 """
 from __future__ import annotations
 
@@ -16,12 +16,12 @@ from importlib import resources
 
 import libcst as cst
 
-from spark_upgrade_rules import _cst
+from spark_upgrade_rules import _cst, target
 from spark_upgrade_rules.detector import Detector
 
 
 def _core_keys() -> frozenset[str]:
-    text = resources.files("spark_upgrade_rules").joinpath("data/spark_core_config_keys_3_5_5.txt").read_text("utf-8")
+    text = resources.files("spark_upgrade_rules").joinpath(f"data/spark_core_config_keys_{target.RELEASE.replace('.', '_')}.txt").read_text("utf-8")
     return frozenset(line.strip() for line in text.splitlines() if line.strip() and not line.startswith("#"))
 
 
@@ -101,7 +101,7 @@ class RemovedSqlConfigDetect(Detector):
                               f"session cannot be created. The 2.4 behaviour it switched is gone -- {instead}.",
                         "medium" if unknown else "high")
         elif key in IGNORED:
-            self.report(node, f"{key} does not exist in Spark 3.5.5: setting it does nothing, so the 2.4 behaviour it "
+            self.report(node, f"{key} does not exist in Spark {target.RELEASE}: setting it does nothing, so the 2.4 behaviour it "
                               f"selected is silently lost -- {IGNORED[key]}.", "medium")
 
 

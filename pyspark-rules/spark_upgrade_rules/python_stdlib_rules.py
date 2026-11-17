@@ -13,9 +13,11 @@ the call:
     `is_alive()` in a file that imports `threading`.
   - Reported, because the replacement behaves differently: `time.clock`,
     `cgi.escape`, `platform.linux_distribution`/`dist` (3.8), `os.errno` (3.7),
-    `fractions.gcd` (3.9), `inspect.getargspec` (3.11), and an `isAlive()`
+    `fractions.gcd` (3.9), `inspect.getargspec` (3.11), an `isAlive()`
     call in a file that does not import `threading`, where the object may not
-    be a thread.
+    be a thread, and ElementTree's `getchildren()`/`getiterator()` (3.9) in a
+    file that imports `xml.etree` and not lxml, whose elements still have them
+    (the receiver's type is not known, so it is not rewritten).
 """
 from __future__ import annotations
 
@@ -47,6 +49,9 @@ REPORTED = {
 ELEMENT_TREE = "xml.etree.cElementTree"
 
 JSON_READERS = frozenset({"json.loads", "json.load"})
+
+# ElementTree's Element methods Python 3.9 removed -> what returns the same elements.
+ELEMENT_METHODS = {"getchildren": "list(elem)", "getiterator": "list(elem.iter(tag))"}
 
 
 class _ImportsModule(cst.CSTVisitor):
@@ -91,6 +96,8 @@ class PythonStdlibRemoved(Fixer):
         self.needs_abc_import = False
         self.has_abc_import = False
         self.imports_threading = _imports(ctx.module, "threading")
+        self.imports_etree = (any(_imports(ctx.module, m) for m in ("xml.etree.ElementTree", "xml.etree.cElementTree", "xml.etree"))
+                              and not any(_imports(ctx.module, m) for m in ("lxml", "lxml.etree")))
 
     def visit_Import(self, node: cst.Import) -> None:
         if any(get_full_name_for_node(a.name) == "collections.abc" for a in node.names):
@@ -107,6 +114,9 @@ class PythonStdlibRemoved(Fixer):
                                 f"json's encoding argument is gone: {_removed_in('3.9', 'it')}. It has been ignored since "
                                 "Python 3.1, so dropping it changes nothing.")
         func = updated_node.func
+        if isinstance(func, cst.Attribute) and func.attr.value in ELEMENT_METHODS and self.imports_etree:
+            self.report(original_node, f"Element.{func.attr.value}() is gone: {_removed_in('3.9')}. Use "
+                                       f"{ELEMENT_METHODS[func.attr.value]}, the same elements.", "medium")
         if isinstance(func, cst.Attribute) and func.attr.value == "isAlive" and not original_node.args:
             message = f"Thread.isAlive() is gone: {_removed_in('3.9')}."
             if self.imports_threading:
