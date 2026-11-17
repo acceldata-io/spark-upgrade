@@ -928,6 +928,25 @@ class PythonStdlibCallsTest(unittest.TestCase):
         """)
         self.assertEqual(found, [])
 
+    def test_html_parser_unescape_is_reported_where_the_file_imports_html_parser(self):
+        # The 2026-11-17 user trial: HTMLParser().unescape(s) on Python 3.11 (AttributeError).
+        out, found = PythonStdlibRemovedTest.run_fix("""
+            from html.parser import HTMLParser
+            name = HTMLParser().unescape(raw)
+        """)
+        self.assertIn("HTMLParser().unescape(raw)", out)
+        self.assertEqual([(f["line"], f.get("tier"), f["confidence"]) for f in found], [(3, None, "medium")])
+        self.assertIn("html.unescape(s)", found[0]["message"])
+
+    def test_unescape_without_an_html_parser_import_is_left_alone(self):
+        _, found = PythonStdlibRemovedTest.run_fix("""
+            import html
+            from xml.sax.saxutils import unescape
+            name = html.unescape(raw)
+            other = codec.unescape(raw)
+        """)
+        self.assertEqual(found, [])
+
 class PythonLibraryRemovedTest(unittest.TestCase):
     """numpy 1.24, pandas 2.0 and PyYAML 6 removals (np.float, Series.iteritems,
     DataFrame.append and yaml.load fail once pip installs current releases on
