@@ -40,7 +40,7 @@ from __future__ import annotations
 import libcst as cst
 import libcst.helpers  # noqa: F401 -- cst.helpers
 
-from spark_upgrade_rules import _cst
+from spark_upgrade_rules import _cst, target
 from spark_upgrade_rules.detector import Fixer
 
 ROW = ("pyspark.sql.Row", "pyspark.sql.types.Row")
@@ -262,6 +262,7 @@ _GONE = {
         "moved to pyspark.ml.wrapper in 3.0 (from pyspark.ml.wrapper import JavaPredictionModel), and is now a full model "
         "class that extends JavaModel rather than a mixin -- drop JavaModel from the class's bases, or the class cannot be "
         "created (inconsistent MRO)",
+    # Moved in 3.4: on a 3.3 target both are still in pyspark.sql.utils (dropped below).
     ("pyspark.sql.utils", "capture_sql_exception"):
         "moved to pyspark.errors.exceptions.captured in 3.4 (from pyspark.errors.exceptions.captured import "
         "capture_sql_exception); an internal API -- it now converts to pyspark.errors exception classes",
@@ -276,6 +277,10 @@ _GONE = {
             "GBTClassificationModel); a subclass has to build on the public estimator or model instead"
        for key, private in _PRIVATE_ML.items()},
 }
+if not target.at_least("3.4"):
+    for _key in (("pyspark.sql.utils", "capture_sql_exception"), ("pyspark.sql.utils", "install_exception_handler")):
+        del _GONE[_key]
+
 # Modules 3.5.5 no longer has, for `import <module>` (the `from` forms are in the tables above).
 # pyspark.streaming.kafka and .flume are left out: their connectors are a dependency blocker.
 _GONE_MODULES = {"pyspark.heapq3": "removed in 3.x -- use Python's own heapq (import heapq)"}
@@ -288,7 +293,9 @@ STORAGE_LEVEL = ("pyspark.StorageLevel", "pyspark.storagelevel.StorageLevel")
 
 # pyspark.sql.functions keywords renamed between 2.4.8 and 3.5.5 -- every one
 # a signature diff of the module finds. Positional calls are unaffected.
-_RENAMED_KEYWORDS = {"lag": ("count", "offset"), "lead": ("count", "offset"), "regexp_replace": ("str", "string")}
+# regexp_replace's `str` became `string` in 3.4: on 3.3.3 it is still `str`.
+_RENAMED_KEYWORDS = {"lag": ("count", "offset"), "lead": ("count", "offset"),
+                     **({"regexp_replace": ("str", "string")} if target.at_least("3.4") else {})}
 
 # Parameters 2.4 accepted and ignored, removed in 3.x: (name, positional index).
 # Passed by keyword it is a TypeError; positionally every later argument shifts.
