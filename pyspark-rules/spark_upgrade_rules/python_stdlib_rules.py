@@ -15,9 +15,10 @@ the call:
     `cgi.escape`, `platform.linux_distribution`/`dist` (3.8), `os.errno` (3.7),
     `fractions.gcd` (3.9), `inspect.getargspec` (3.11), an `isAlive()`
     call in a file that does not import `threading`, where the object may not
-    be a thread, and ElementTree's `getchildren()`/`getiterator()` (3.9) in a
-    file that imports `xml.etree` and not lxml, whose elements still have them
-    (the receiver's type is not known, so it is not rewritten).
+    be a thread, ElementTree's `getchildren()`/`getiterator()` (3.9) in a
+    file that imports `xml.etree` and not lxml, whose elements still have them,
+    and `HTMLParser().unescape()` (3.9) in a file that imports `html.parser`
+    (the receiver's type is not known, so neither is rewritten).
 """
 from __future__ import annotations
 
@@ -52,6 +53,9 @@ JSON_READERS = frozenset({"json.loads", "json.load"})
 
 # ElementTree's Element methods Python 3.9 removed -> what returns the same elements.
 ELEMENT_METHODS = {"getchildren": "list(elem)", "getiterator": "list(elem.iter(tag))"}
+
+# HTMLParser.unescape, which Python 3.9 removed, called html.unescape from 3.4.
+HTML_PARSER = "html.parser"
 
 
 class _ImportsModule(cst.CSTVisitor):
@@ -98,6 +102,7 @@ class PythonStdlibRemoved(Fixer):
         self.imports_threading = _imports(ctx.module, "threading")
         self.imports_etree = (any(_imports(ctx.module, m) for m in ("xml.etree.ElementTree", "xml.etree.cElementTree", "xml.etree"))
                               and not any(_imports(ctx.module, m) for m in ("lxml", "lxml.etree")))
+        self.imports_html_parser = _imports(ctx.module, HTML_PARSER)
 
     def visit_Import(self, node: cst.Import) -> None:
         if any(get_full_name_for_node(a.name) == "collections.abc" for a in node.names):
@@ -117,6 +122,10 @@ class PythonStdlibRemoved(Fixer):
         if isinstance(func, cst.Attribute) and func.attr.value in ELEMENT_METHODS and self.imports_etree:
             self.report(original_node, f"Element.{func.attr.value}() is gone: {_removed_in('3.9')}. Use "
                                        f"{ELEMENT_METHODS[func.attr.value]}, the same elements.", "medium")
+        if (isinstance(func, cst.Attribute) and func.attr.value == "unescape" and self.imports_html_parser
+                and len(original_node.args) == 1):
+            self.report(original_node, f"HTMLParser.unescape() is gone: {_removed_in('3.9')}. Use html.unescape(s), "
+                                       "the function it called since Python 3.4.", "medium")
         if isinstance(func, cst.Attribute) and func.attr.value == "isAlive" and not original_node.args:
             message = f"Thread.isAlive() is gone: {_removed_in('3.9')}."
             if self.imports_threading:
